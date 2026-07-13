@@ -91,12 +91,13 @@ Kodi requires the folder inside the zip to match the add-on id
 (`plugin.video.libtv`). Build from committed state:
 
 ```bash
-mkdir -p dist
-git archive --format=zip --prefix=plugin.video.libtv/ -o dist/plugin.video.libtv.zip HEAD
+make zip    # → dist/plugin.video.libtv.zip
 ```
 
 Dev-only files (tests, Poetry config, dev container) are excluded via
-`.gitattributes` `export-ignore` rules.
+`.gitattributes` `export-ignore` rules. Note the zip is built by
+`scripts/build_zip.py` rather than `git archive --format=zip`, because Kodi
+rejects git's zip output (it carries an archive comment Kodi can't parse).
 
 ## Project status
 

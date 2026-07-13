@@ -54,18 +54,23 @@ errors or warnings.
 Build the installable zip (packages **committed** state only — commit first):
 
 ```bash
-mkdir -p dist && git archive --format=zip --prefix=plugin.video.libtv/ -o dist/plugin.video.libtv.zip HEAD
+make zip        # runs scripts/build_zip.py
 ```
 
 Dev-only files are excluded from the zip via `export-ignore` in `.gitattributes`;
 keep that list in sync when adding dev-only files or directories. A `Makefile`
-wraps the common tasks (`make check`, `make zip`); `make zip` refuses dirty
+wraps the common tasks (`make check`, `make zip`); the build refuses dirty
 trees and verifies the built zip contains the key add-on files.
 
-**Gotcha:** `.gitignore` patterns must be root-anchored where they could match
-add-on source — an unanchored `lib/` once silently excluded `resources/lib/`
-from git and therefore from the built zip, which shipped an add-on that
-crashed with `ModuleNotFoundError: No module named 'libtv'`.
+**Packaging gotchas (both shipped broken zips before):**
+- `.gitignore` patterns must be root-anchored where they could match add-on
+  source — an unanchored `lib/` once silently excluded `resources/lib/` from
+  git and therefore from the built zip (`ModuleNotFoundError: No module named
+  'libtv'` at runtime).
+- Never build the zip with `git archive --format=zip` — git appends the
+  commit SHA as a zip archive comment, which Kodi's zip parser rejects with
+  "invalid structure". `scripts/build_zip.py` repacks git archive's tar
+  output into a plain zip instead.
 
 ## Hard constraints — Kodi runtime
 

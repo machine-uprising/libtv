@@ -47,7 +47,7 @@ def jsonrpc(args, method, params=None):
     payload = json.dumps(
         {"jsonrpc": "2.0", "id": 1, "method": method, "params": params or {}}
     ).encode()
-    url = "http://{}:{}/jsonrpc".format(args.host, args.port)
+    url = f"http://{args.host}:{args.port}/jsonrpc"
     req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"})
     if args.user:
         token = base64.b64encode("{}:{}".format(args.user, args.password or "").encode()).decode()
@@ -58,11 +58,11 @@ def jsonrpc(args, method, params=None):
     except urllib.error.HTTPError as exc:
         if exc.code == 401:
             sys.exit("error: 401 Unauthorized -- pass --user/--password (HTTP auth is on).")
-        sys.exit("error: HTTP {} from {}".format(exc.code, url))
+        sys.exit(f"error: HTTP {exc.code} from {url}")
     except urllib.error.URLError as exc:
         sys.exit(
-            "error: cannot reach {} ({}). Is Kodi running with "
-            "'Allow remote control via HTTP' enabled?".format(url, exc.reason)
+            f"error: cannot reach {url} ({exc.reason}). Is Kodi running with "
+            "'Allow remote control via HTTP' enabled?"
         )
     if "error" in body:
         sys.exit("error: JSON-RPC {} failed: {}".format(method, body["error"]))
@@ -76,7 +76,7 @@ def check_kind(args, label, method, key, props):
 
     problems = []
     if not items:
-        problems.append("EMPTY -- no {} in the library; this channel will be blank".format(key))
+        problems.append(f"EMPTY -- no {key} in the library; this channel will be blank")
         print_section(label, total, problems)
         return len(problems)
 
@@ -105,13 +105,12 @@ def check_kind(args, label, method, key, props):
     zero_runtime = [it for it in items if not it.get("runtime")]
     if zero_runtime:
         problems.append(
-            "{} item(s) have no runtime -> scheduled at the 90-min default".format(
-                len(zero_runtime)
-            )
+            f"{len(zero_runtime)} item(s) have no runtime -> scheduled at the 90-min default"
         )
 
     print_section(label, total, problems)
-    return len([p for p in problems if "default" not in p])  # zero-runtime is a warning, not a failure
+    # zero-runtime is a warning, not a failure
+    return len([p for p in problems if "default" not in p])
 
 
 def _id_field(key):
@@ -120,13 +119,15 @@ def _id_field(key):
 
 def print_section(label, total, problems):
     status = "OK" if not problems else "ISSUES"
-    print("\n[{}] {} -- {} item(s) reported".format(status, label, total))
+    print(f"\n[{status}] {label} -- {total} item(s) reported")
     for p in problems:
-        print("  - {}".format(p))
+        print(f"  - {p}")
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", default="8080")
     parser.add_argument("--user", default=None, help="HTTP JSON-RPC username (if auth is enabled)")
@@ -136,15 +137,17 @@ def main():
 
     ping = jsonrpc(args, "JSONRPC.Ping")
     if ping != "pong":
-        sys.exit("error: unexpected ping response: {!r}".format(ping))
-    print("Connected to Kodi at {}:{}".format(args.host, args.port))
+        sys.exit(f"error: unexpected ping response: {ping!r}")
+    print(f"Connected to Kodi at {args.host}:{args.port}")
 
     failures = 0
     failures += check_kind(args, "Movies channel", "VideoLibrary.GetMovies", "movies", MOVIE_PROPS)
-    failures += check_kind(args, "TV Shows channel", "VideoLibrary.GetEpisodes", "episodes", EPISODE_PROPS)
+    failures += check_kind(
+        args, "TV Shows channel", "VideoLibrary.GetEpisodes", "episodes", EPISODE_PROPS
+    )
 
     if failures:
-        print("\nResult: {} issue group(s) found -- fix these before testing playback.".format(failures))
+        print(f"\nResult: {failures} issue group(s) found -- fix these before testing playback.")
         sys.exit(1)
     print("\nResult: library looks good for LibTV.")
 
