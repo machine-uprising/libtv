@@ -58,9 +58,11 @@ def _seek_into_programme(offset, file_path):
                 current = player.getTime()
             except RuntimeError:
                 playing, total, current = None, 0, 0  # stream not fully open yet
-            if playing and playing != file_path:
-                return  # user already zapped to something else
-            if playing and total > 0:
+            # A different file playing is NOT "user zapped away": on a channel
+            # change the previous channel's stream is still playing when this
+            # resolver runs. Keep waiting until OUR file is open; if the user
+            # really left, the timeout ends the wait.
+            if playing == file_path and total > 0:
                 # Clamp: bad runtime metadata can schedule slots longer than
                 # the actual file; never seek past (or into the last 10s of)
                 # the real duration.
@@ -71,7 +73,7 @@ def _seek_into_programme(offset, file_path):
         if monitor.waitForAbort(SEEK_POLL):
             return
         waited += SEEK_POLL
-    xbmc.log("LibTV: gave up waiting for playback to start, no seek", xbmc.LOGWARNING)
+    xbmc.log("LibTV: playback of scheduled file never started, no seek", xbmc.LOGWARNING)
 
 
 def play(handle, channel_id):

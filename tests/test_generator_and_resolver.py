@@ -116,7 +116,29 @@ def test_resolver_skips_seek_when_disabled(monkeypatch):
     assert _seek_calls() == []
 
 
-def test_resolver_skips_seek_when_user_zapped_away(monkeypatch):
+def test_resolver_seeks_after_channel_change(monkeypatch):
+    """On a zap between channels, the OLD channel's stream is still playing
+    when the resolver runs; the seek must wait for our file, not bail."""
+    from libtv import generator
+
+    _with_library(monkeypatch)
+    data = generator.regenerate()
+    offset = _freeze_mid_programme(monkeypatch, data, seconds_in=1800)
+    conftest.PLAYER.update(playing=True, file="/media/old.mkv", time=999.0, total=5400.0)
+    # The channel change completes after a couple of poll cycles.
+    conftest.WAIT_HOOKS.extend([
+        lambda: None,
+        lambda: conftest.PLAYER.update(file="/media/a.mkv", time=0.0, total=6000.0),
+    ])
+
+    _run_plugin(monkeypatch, "?action=play&channel=libtv.movies")
+
+    assert _seek_calls() == [("xbmc.Player.seekTime", offset)]
+
+
+def test_resolver_gives_up_when_file_never_starts(monkeypatch):
+    """User zapped away for good: our file never opens, so after the poll
+    timeout there must be no seek (especially not into the other stream)."""
     from libtv import generator
 
     _with_library(monkeypatch)

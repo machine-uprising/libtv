@@ -136,12 +136,17 @@ Anything touching real playback, PVR behavior, or the EPG UI can only be
 verified in a running Kodi instance with IPTV Simple Client configured —
 see `docs/live-testing.md` for the checklist.
 
-**Live-verified finding:** Kodi ignores the ListItem `StartOffset` property
-on streams resolved for PVR IPTV Simple (confirmed on Omega/Windows). Do not
-reintroduce it — join-in-progress is implemented as a post-start
-`Player.seekTime()` in `plugin._seek_into_programme`, which polls until the
-player has our file open, clamps to the real file duration, and bails out if
-the user has already zapped elsewhere.
+**Live-verified findings:**
+- Kodi ignores the ListItem `StartOffset` property on streams resolved for
+  PVR IPTV Simple (confirmed on Omega/Windows). Do not reintroduce it —
+  join-in-progress is implemented as a post-start `Player.seekTime()` in
+  `plugin._seek_into_programme`, which polls until the player has our file
+  open and clamps to the real file duration.
+- During a channel *change*, the previous channel's stream is still playing
+  when the new resolver runs. The seek loop must therefore treat "a
+  different file is playing" as *not started yet* and keep polling — never
+  as "user zapped away" (that early-return broke seeking on every channel
+  change). Genuine zap-away is covered by the poll timeout.
 
 ## Known gaps (as of 2026-07)
 
