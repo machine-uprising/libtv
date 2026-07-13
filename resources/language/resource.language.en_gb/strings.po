@@ -1,0 +1,46 @@
+# Kodi Media Center language file
+# Addon Name: LibTV
+# Addon id: plugin.video.libtv
+msgid ""
+msgstr ""
+"Project-Id-Version: LibTV\n"
+"Language: en_gb\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+
+msgctxt "#32100"
+msgid "General"
+msgstr ""
+
+msgctxt "#32101"
+msgid "Channels"
+msgstr ""
+
+msgctxt "#32102"
+msgid "Max items per channel"
+msgstr ""
+
+msgctxt "#32103"
+msgid "Shuffle content"
+msgstr ""
+
+msgctxt "#32104"
+msgid "Guide & playback"
+msgstr ""
+
+msgctxt "#32105"
+msgid "Guide length (hours)"
+msgstr ""
+
+msgctxt "#32106"
+msgid "Refresh interval (hours)"
+msgstr ""
+
+msgctxt "#32107"
+msgid "Join programmes in progress"
+msgstr ""
+
+msgctxt "#32108"
+msgid "Regenerate channels now"
+msgstr ""

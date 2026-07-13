@@ -1,0 +1,14 @@
+# Files excluded from the add-on zip built with:
+#   git archive --format=zip --prefix=plugin.video.libtv/ -o dist/plugin.video.libtv.zip HEAD
+.devcontainer export-ignore
+docs export-ignore
+scripts export-ignore
+Makefile export-ignore
+tests export-ignore
+pyproject.toml export-ignore
+poetry.lock export-ignore
+poetry.toml export-ignore
+CLAUDE.md export-ignore
+README.md export-ignore
+.gitignore export-ignore
+.gitattributes export-ignore

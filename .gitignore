@@ -216,3 +216,15 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+
+# Kodi add-on specific
+userdata/
+*.pyc
+__pycache__/
+.DS_Store
+Thumbs.db
+
+# Generated files (but keep them in .gitignore for dev)
+resources/media/*.png
+resources/media/*.jpg

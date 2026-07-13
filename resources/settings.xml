@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<settings version="1">
+    <section id="plugin.video.libtv">
+        <category id="general" label="32100" help="">
+            <group id="1" label="32101">
+                <setting id="max_items" type="integer" label="32102" help="">
+                    <level>0</level>
+                    <default>150</default>
+                    <constraints>
+                        <minimum>10</minimum>
+                        <maximum>1000</maximum>
+                    </constraints>
+                    <control type="slider" format="integer"/>
+                </setting>
+                <setting id="shuffle" type="boolean" label="32103" help="">
+                    <level>0</level>
+                    <default>true</default>
+                    <control type="toggle"/>
+                </setting>
+            </group>
+            <group id="2" label="32104">
+                <setting id="epg_hours" type="integer" label="32105" help="">
+                    <level>0</level>
+                    <default>24</default>
+                    <constraints>
+                        <minimum>6</minimum>
+                        <maximum>72</maximum>
+                    </constraints>
+                    <control type="slider" format="integer"/>
+                </setting>
+                <setting id="regen_interval_hours" type="integer" label="32106" help="">
+                    <level>0</level>
+                    <default>6</default>
+                    <constraints>
+                        <minimum>1</minimum>
+                        <maximum>24</maximum>
+                    </constraints>
+                    <control type="slider" format="integer"/>
+                </setting>
+                <setting id="join_in_progress" type="boolean" label="32107" help="">
+                    <level>0</level>
+                    <default>true</default>
+                    <control type="toggle"/>
+                </setting>
+                <setting id="regenerate_now" type="action" label="32108" help="">
+                    <level>0</level>
+                    <data>RunPlugin(plugin://plugin.video.libtv/?action=build)</data>
+                    <control type="button" format="action"/>
+                </setting>
+            </group>
+        </category>
+    </section>
+</settings>

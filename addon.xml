@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<addon id="plugin.video.libtv" version="0.2.0" name="LibTV" provider-name="You">
+    <requires>
+        <import addon="xbmc.python" version="3.0.1"/>
+    </requires>
+    <extension point="xbmc.python.pluginsource" library="default.py">
+        <provides>video</provides>
+    </extension>
+    <extension point="xbmc.service" library="service.py"/>
+    <extension point="xbmc.addon.metadata">
+        <summary lang="en_GB">LibTV - Your Kodi Library as Real TV</summary>
+        <description lang="en_GB">Turn your movies and TV shows into linear channels with full TV guide support. Generates an M3U playlist and XMLTV guide for PVR IPTV Simple Client, with plugin-resolved streams so channels play whatever is currently on air.</description>
+        <license>GPL-3.0-only</license>
+        <platform>all</platform>
+        <news>v0.2.0: true linear playback via plugin:// stream resolver, background refresh service, schedule persistence.</news>
+    </extension>
+</addon>

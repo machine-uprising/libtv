@@ -1,0 +1,21 @@
+{
+    "name": "LibTV (Kodi add-on)",
+    "image": "mcr.microsoft.com/devcontainers/python:3.12",
+    "features": {
+        "ghcr.io/devcontainers-extra/features/poetry:2": {}
+    },
+    "postCreateCommand": "poetry install",
+    "customizations": {
+        "vscode": {
+            "extensions": [
+                "ms-python.python",
+                "charliermarsh.ruff",
+                "tamasfe.even-better-toml"
+            ],
+            "settings": {
+                "python.defaultInterpreterPath": "${containerWorkspaceFolder}/.venv/bin/python",
+                "python.testing.pytestEnabled": true
+            }
+        }
+    }
+}

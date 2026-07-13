@@ -1,0 +1,31 @@
+[project]
+name = "libtv"
+version = "0.1.0"
+description = "Kodi add-on that turns your library into linear TV channels with full EPG support"
+requires-python = ">=3.11,<3.14"
+
+[tool.poetry]
+# This is a Kodi add-on, not an installable Python package. Poetry only
+# manages the dev toolchain; runtime deps must be Kodi module add-ons
+# declared in addon.xml, never listed here.
+package-mode = false
+
+[tool.poetry.group.dev.dependencies]
+kodistubs = "^21.0"
+pytest = "^8.0"
+ruff = "^0.12"
+kodi-addon-checker = "*"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = [".", "resources/lib"]
+
+[tool.ruff]
+line-length = 100
+# Add-on code runs on Kodi's embedded interpreter, which is Python 3.8 on
+# Kodi 19 (Matrix) — the oldest version addon.xml supports. Keep lint rules
+# from suggesting newer-only syntax for the runtime code.
+target-version = "py38"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
