@@ -63,17 +63,12 @@ def _freeze_mid_programme(monkeypatch, data, seconds_in=1800):
     return seconds_in
 
 
-def _seek_calls():
-    return [c for c in conftest.CALLS if c[0] == "xbmc.Player.seekTime"]
-
-
-def test_resolver_plays_current_programme_and_seeks(monkeypatch):
+def test_resolver_plays_current_programme_and_hands_off_seek(monkeypatch):
     from libtv import generator
 
     _with_library(monkeypatch)
     data = generator.regenerate()
     offset = _freeze_mid_programme(monkeypatch, data, seconds_in=1800)
-    conftest.PLAYER.update(playing=True, file="/media/a.mkv", time=0.0, total=6000.0)
 
     _run_plugin(monkeypatch, "?action=play&channel=libtv.movies")
 
@@ -83,82 +78,36 @@ def test_resolver_plays_current_programme_and_seeks(monkeypatch):
     assert handle == 7
     assert succeeded is True
     assert listitem.path == "/media/a.mkv"
-    # Kodi ignores StartOffset on resolved PVR streams, so join-in-progress
-    # is a post-start seek to the schedule offset.
-    assert _seek_calls() == [("xbmc.Player.seekTime", offset)]
+    # The seek itself happens in the service (daemon.JoinInProgressPlayer);
+    # the resolver just records what to seek to.
+    pending = generator.read_pending_seek()
+    assert pending["file"] == "/media/a.mkv"
+    assert pending["offset"] == offset
 
 
-def test_resolver_seek_clamps_to_file_length(monkeypatch):
-    from libtv import generator
-
-    _with_library(monkeypatch)
-    data = generator.regenerate()
-    _freeze_mid_programme(monkeypatch, data, seconds_in=5000)
-    # File is really much shorter than the scheduled slot.
-    conftest.PLAYER.update(playing=True, file="/media/a.mkv", time=0.0, total=3000.0)
-
-    _run_plugin(monkeypatch, "?action=play&channel=libtv.movies")
-
-    assert _seek_calls() == [("xbmc.Player.seekTime", 3000.0 - 10)]
-
-
-def test_resolver_skips_seek_when_disabled(monkeypatch):
+def test_resolver_writes_no_pending_seek_when_disabled(monkeypatch):
     from libtv import generator
 
     _with_library(monkeypatch)
     data = generator.regenerate()
     _freeze_mid_programme(monkeypatch, data, seconds_in=1800)
-    conftest.PLAYER.update(playing=True, file="/media/a.mkv", time=0.0, total=6000.0)
     monkeypatch.setitem(conftest.SETTINGS, "join_in_progress", "false")
 
     _run_plugin(monkeypatch, "?action=play&channel=libtv.movies")
 
-    assert _seek_calls() == []
-
-
-def test_resolver_seeks_after_channel_change(monkeypatch):
-    """On a zap between channels, the OLD channel's stream is still playing
-    when the resolver runs; the seek must wait for our file, not bail."""
-    from libtv import generator
-
-    _with_library(monkeypatch)
-    data = generator.regenerate()
-    offset = _freeze_mid_programme(monkeypatch, data, seconds_in=1800)
-    conftest.PLAYER.update(playing=True, file="/media/old.mkv", time=999.0, total=5400.0)
-    # The channel change completes after a couple of poll cycles.
-    conftest.WAIT_HOOKS.extend([
-        lambda: None,
-        lambda: conftest.PLAYER.update(file="/media/a.mkv", time=0.0, total=6000.0),
-    ])
-
-    _run_plugin(monkeypatch, "?action=play&channel=libtv.movies")
-
-    assert _seek_calls() == [("xbmc.Player.seekTime", offset)]
-
-
-def test_resolver_gives_up_when_file_never_starts(monkeypatch):
-    """User zapped away for good: our file never opens, so after the poll
-    timeout there must be no seek (especially not into the other stream)."""
-    from libtv import generator
-
-    _with_library(monkeypatch)
-    data = generator.regenerate()
-    _freeze_mid_programme(monkeypatch, data, seconds_in=1800)
-    conftest.PLAYER.update(playing=True, file="/media/other.mkv", time=0.0, total=6000.0)
-
-    _run_plugin(monkeypatch, "?action=play&channel=libtv.movies")
-
-    assert _seek_calls() == []
+    assert generator.read_pending_seek() is None
 
 
 def test_resolver_fails_cleanly_for_unknown_channel(monkeypatch):
+    from libtv import generator
+
     _with_library(monkeypatch)
-    conftest.PLAYER.update(playing=False, file="", time=0.0, total=0.0)
     _run_plugin(monkeypatch, "?action=play&channel=libtv.nope")
 
     resolved = [c for c in conftest.CALLS if c[0] == "xbmcplugin.setResolvedUrl"]
     assert len(resolved) == 1
     assert resolved[0][2] is False
+    assert generator.read_pending_seek() is None
 
 
 def test_menu_lists_actions(monkeypatch):

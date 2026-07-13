@@ -43,22 +43,15 @@ def _execute_jsonrpc(request: str) -> str:
 # Tests mutate this to simulate the player; seekTime lands in CALLS.
 PLAYER = {"playing": False, "file": "", "time": 0.0, "total": 0.0}
 
-# Each waitForAbort call pops and runs one hook — lets tests change PLAYER
-# state mid-poll (e.g. simulate a channel change finishing).
-WAIT_HOOKS: list = []
-
 
 class _Monitor:
     """Non-aborting monitor: waitForAbort returns immediately without
-    sleeping, so poll loops (e.g. the join-in-progress seek) run fast in
-    tests. Don't call daemon.run() against this fake — it would spin."""
+    sleeping. Don't call daemon.run() against this fake — it would spin."""
 
     def abortRequested(self) -> bool:
         return False
 
     def waitForAbort(self, timeout: float = 0) -> bool:
-        if WAIT_HOOKS:
-            WAIT_HOOKS.pop(0)()
         return False
 
 
@@ -205,6 +198,8 @@ import pytest  # noqa: E402  (fakes must be installed before anything imports xb
 @pytest.fixture(autouse=True)
 def _reset_kodi_fakes():
     yield
+    from libtv import generator
+
+    generator.clear_pending_seek()
     PLAYER.update(playing=False, file="", time=0.0, total=0.0)
-    WAIT_HOOKS.clear()
     CALLS.clear()

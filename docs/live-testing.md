@@ -72,12 +72,14 @@ rebuilds — see the packaging gotchas in `CLAUDE.md`.) Then in Kodi:
   `?action=play&channel=libtv.movies` (or `libtv.tv`) and plays whatever the
   schedule says is on air *now*.
 - **Join-in-progress** — zap to a channel mid-programme and confirm playback
-  **jumps partway in shortly after starting**, matching how far into the
-  programme the schedule places you. (Verified: Kodi *ignores* `StartOffset`
-  on resolved PVR streams, so `plugin._seek_into_programme` seeks after the
-  player opens the file — expect up to a second or two of the beginning
-  before the jump. Only happens when `join_in_progress` is on and the offset
-  exceeds 5 seconds.)
+  **jumps partway in shortly after starting** (expect a moment of the
+  beginning before the jump), matching where the schedule places you. Test
+  BOTH first tune *and* switching between channels — they exercise different
+  code paths. The seek is performed by the background service
+  (`daemon.JoinInProgressPlayer.onAVStarted`) from `pending_seek.json`
+  written by the resolver; the log line to look for is
+  `LibTV: joining programme in progress at <n>s`. Requires the service to be
+  running (it starts with Kodi / on add-on install).
 - **Guide/playback agreement** — what the EPG shows as "now" is exactly what
   plays. Both derive from `schedule.json`; they must never disagree.
 - **Schedule stability within a day** — press **Regenerate now**, then confirm

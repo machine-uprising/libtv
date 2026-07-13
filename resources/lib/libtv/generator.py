@@ -14,6 +14,10 @@ from libtv import library, schedule, writers
 M3U_NAME = "channels.m3u"
 XMLTV_NAME = "guide.xmltv"
 SCHEDULE_NAME = "schedule.json"
+PENDING_SEEK_NAME = "pending_seek.json"
+
+# A pending seek older than this is abandoned (playback never started).
+PENDING_SEEK_MAX_AGE = 120
 
 
 def profile_dir():
@@ -89,3 +93,43 @@ def load_schedule():
     except (OSError, ValueError) as exc:
         xbmc.log(f"LibTV: could not read schedule: {exc}", xbmc.LOGWARNING)
         return None
+
+
+def _pending_seek_path():
+    return os.path.join(profile_dir(), PENDING_SEEK_NAME)
+
+
+def write_pending_seek(file_path, offset):
+    """Hand a join-in-progress seek over to the service.
+
+    The resolver cannot seek reliably itself: its script gets terminated
+    when the previous channel's stream stops during a channel change, so the
+    long-lived service performs the seek from its Player.onAVStarted.
+    """
+    payload = {"file": file_path, "offset": int(offset), "set_at": time.time()}
+    with open(_pending_seek_path(), "w", encoding="utf-8") as f:
+        json.dump(payload, f)
+
+
+def read_pending_seek():
+    """Return the pending seek, or None. Stale/corrupt entries are removed;
+    fresh ones are left in place — the consumer clears after acting."""
+    path = _pending_seek_path()
+    if not os.path.exists(path):
+        return None
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        data = None
+    if not data or time.time() - data.get("set_at", 0) > PENDING_SEEK_MAX_AGE:
+        clear_pending_seek()
+        return None
+    return data
+
+
+def clear_pending_seek():
+    try:
+        os.remove(_pending_seek_path())
+    except OSError:
+        pass

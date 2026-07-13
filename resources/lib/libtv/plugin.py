@@ -34,48 +34,6 @@ def build():
     )
 
 
-# How long to wait for playback to actually start before giving up on the
-# join-in-progress seek, and how often to poll while waiting.
-SEEK_TIMEOUT = 30.0
-SEEK_POLL = 0.25
-
-
-def _seek_into_programme(offset, file_path):
-    """Seek once playback has started, to join the programme in progress.
-
-    Kodi ignores the ListItem StartOffset property on streams resolved for
-    PVR IPTV Simple (verified on Omega), so the resolver stays alive after
-    setResolvedUrl, waits for the player to open our file, and seeks.
-    """
-    monitor = xbmc.Monitor()
-    player = xbmc.Player()
-    waited = 0.0
-    while waited < SEEK_TIMEOUT and not monitor.abortRequested():
-        if player.isPlaying():
-            try:
-                playing = player.getPlayingFile()
-                total = player.getTotalTime()
-                current = player.getTime()
-            except RuntimeError:
-                playing, total, current = None, 0, 0  # stream not fully open yet
-            # A different file playing is NOT "user zapped away": on a channel
-            # change the previous channel's stream is still playing when this
-            # resolver runs. Keep waiting until OUR file is open; if the user
-            # really left, the timeout ends the wait.
-            if playing == file_path and total > 0:
-                # Clamp: bad runtime metadata can schedule slots longer than
-                # the actual file; never seek past (or into the last 10s of)
-                # the real duration.
-                target = min(offset, max(total - 10, 0))
-                if current < target - 5:
-                    player.seekTime(target)
-                return
-        if monitor.waitForAbort(SEEK_POLL):
-            return
-        waited += SEEK_POLL
-    xbmc.log("LibTV: playback of scheduled file never started, no seek", xbmc.LOGWARNING)
-
-
 def play(handle, channel_id):
     now = time.time()
     data = generator.load_schedule()
@@ -91,9 +49,14 @@ def play(handle, channel_id):
         return
 
     prog, offset = found
-    xbmcplugin.setResolvedUrl(handle, True, xbmcgui.ListItem(path=prog["file"]))
+    # The join-in-progress seek is performed by the service (daemon.py) from
+    # Player.onAVStarted — this resolver script is not reliable for it (Kodi
+    # terminates it during channel changes, and ignores StartOffset on
+    # resolved PVR streams). Written BEFORE resolving so it survives even if
+    # this script dies right after setResolvedUrl.
     if xbmcaddon.Addon().getSettingBool("join_in_progress") and offset > 5:
-        _seek_into_programme(int(offset), prog["file"])
+        generator.write_pending_seek(prog["file"], offset)
+    xbmcplugin.setResolvedUrl(handle, True, xbmcgui.ListItem(path=prog["file"]))
 
 
 def run(argv):
