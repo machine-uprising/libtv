@@ -1,0 +1,72 @@
+"""Plugin routing: add-on menu and the channel stream resolver.
+
+IPTV Simple Client plays plugin://plugin.video.libtv/?action=play&channel=<id>
+for every channel; `play` resolves that to whatever the schedule says is on
+air right now.
+"""
+from __future__ import annotations
+
+import time
+from urllib.parse import parse_qs
+
+import xbmc
+import xbmcaddon
+import xbmcgui
+import xbmcplugin
+
+from libtv import generator, schedule
+
+
+def main_menu(base_url, handle):
+    for label, action in [
+        ("Rebuild channels now", "build"),
+        ("Open settings", "settings"),
+    ]:
+        li = xbmcgui.ListItem(label)
+        xbmcplugin.addDirectoryItem(handle, f"{base_url}?action={action}", li, False)
+    xbmcplugin.endOfDirectory(handle)
+
+
+def build():
+    generator.regenerate()
+    xbmcgui.Dialog().notification(
+        "LibTV", "Channels & guide updated", xbmcgui.NOTIFICATION_INFO, 5000
+    )
+
+
+def play(handle, channel_id):
+    now = time.time()
+    data = generator.load_schedule()
+    found = schedule.find_current(data, channel_id, now) if data else None
+    if found is None:
+        # Missing or stale schedule — rebuild once and retry.
+        xbmc.log(f"LibTV: schedule miss for {channel_id}, regenerating", xbmc.LOGINFO)
+        data = generator.regenerate()
+        found = schedule.find_current(data, channel_id, now)
+    if found is None:
+        xbmc.log(f"LibTV: nothing scheduled on {channel_id}", xbmc.LOGWARNING)
+        xbmcplugin.setResolvedUrl(handle, False, xbmcgui.ListItem())
+        return
+
+    prog, offset = found
+    li = xbmcgui.ListItem(path=prog["file"])
+    if xbmcaddon.Addon().getSettingBool("join_in_progress") and offset > 5:
+        # Join the programme in progress, like zapping onto a real channel.
+        li.setProperty("StartOffset", str(int(offset)))
+    xbmcplugin.setResolvedUrl(handle, True, li)
+
+
+def run(argv):
+    base_url = argv[0]
+    handle = int(argv[1])
+    params = {k: v[0] for k, v in parse_qs(argv[2][1:]).items()}
+    action = params.get("action")
+
+    if action == "play":
+        play(handle, params.get("channel", ""))
+    elif action == "build":
+        build()
+    elif action == "settings":
+        xbmcaddon.Addon().openSettings()
+    else:
+        main_menu(base_url, handle)

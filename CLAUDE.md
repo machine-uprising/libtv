@@ -58,7 +58,14 @@ mkdir -p dist && git archive --format=zip --prefix=plugin.video.libtv/ -o dist/p
 ```
 
 Dev-only files are excluded from the zip via `export-ignore` in `.gitattributes`;
-keep that list in sync when adding dev-only files or directories.
+keep that list in sync when adding dev-only files or directories. A `Makefile`
+wraps the common tasks (`make check`, `make zip`); `make zip` refuses dirty
+trees and verifies the built zip contains the key add-on files.
+
+**Gotcha:** `.gitignore` patterns must be root-anchored where they could match
+add-on source — an unanchored `lib/` once silently excluded `resources/lib/`
+from git and therefore from the built zip, which shipped an add-on that
+crashed with `ModuleNotFoundError: No module named 'libtv'`.
 
 ## Hard constraints — Kodi runtime
 

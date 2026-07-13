@@ -25,14 +25,23 @@ checker: ## Validate add-on structure with kodi-addon-checker
 	poetry run kodi-addon-checker --branch omega .
 
 # git archive packages COMMITTED state only, so refuse to build with a dirty
-# tree — otherwise the zip silently omits your latest changes.
+# tree — otherwise the zip silently omits your latest changes. Untracked
+# files count as dirty: an overly-broad .gitignore once swallowed
+# resources/lib entirely, so the built zip is also checked for key contents.
 zip: ## Build the installable add-on zip from committed HEAD
-	@if ! git diff-index --quiet HEAD -- 2>/dev/null; then \
-		echo "error: uncommitted changes — 'git archive' packages HEAD only; commit first."; \
+	@if [ -n "$$(git status --porcelain)" ]; then \
+		echo "error: uncommitted or untracked changes — 'git archive' packages HEAD only; commit first."; \
 		exit 1; \
 	fi
 	@mkdir -p $(DIST)
 	git archive --format=zip --prefix=$(ADDON_ID)/ -o $(ZIP) HEAD
+	@for f in addon.xml default.py service.py resources/lib/libtv/plugin.py resources/settings.xml; do \
+		if ! unzip -l $(ZIP) | grep -q "$(ADDON_ID)/$$f"; then \
+			echo "error: built zip is missing $$f — check .gitignore / .gitattributes"; \
+			rm -f $(ZIP); \
+			exit 1; \
+		fi; \
+	done
 	@echo "built $(ZIP)"
 
 check: lint test checker ## Run lint, tests, and the add-on checker
