@@ -71,6 +71,11 @@ trees and verifies the built zip contains the key add-on files.
   commit SHA as a zip archive comment, which Kodi's zip parser rejects with
   "invalid structure". `scripts/build_zip.py` repacks git archive's tar
   output into a plain zip instead.
+- Kodi caches a zip's central directory by file path — replacing a zip
+  in place and reinstalling can read stale entry offsets ("Failed to open
+  file" on addon.xml) until Kodi restarts. The build names zips
+  `<id>-<version>.zip` so releases land on fresh paths; when iterating on
+  the same version, restart Kodi between install attempts.
 
 ## Hard constraints — Kodi runtime
 
@@ -128,9 +133,15 @@ behavior is tested by running `default.py` via `runpy` with a patched
 `sys.argv`.
 
 Anything touching real playback, PVR behavior, or the EPG UI can only be
-verified in a running Kodi instance with IPTV Simple Client configured — in
-particular the `StartOffset` join-in-progress property has NOT yet been
-verified against a real Kodi/IPTV Simple stack.
+verified in a running Kodi instance with IPTV Simple Client configured —
+see `docs/live-testing.md` for the checklist.
+
+**Live-verified finding:** Kodi ignores the ListItem `StartOffset` property
+on streams resolved for PVR IPTV Simple (confirmed on Omega/Windows). Do not
+reintroduce it — join-in-progress is implemented as a post-start
+`Player.seekTime()` in `plugin._seek_into_programme`, which polls until the
+player has our file open, clamps to the real file duration, and bails out if
+the user has already zapped elsewhere.
 
 ## Known gaps (as of 2026-07)
 
@@ -138,4 +149,5 @@ verified against a real Kodi/IPTV Simple stack.
 - Channel lineup is hardcoded to two channels (all movies / all episodes) in
   `library.fetch_channels`; genre- or show-based configurable channels are the
   next feature.
-- `StartOffset` join-in-progress needs real-Kodi verification (see above).
+- After regeneration, IPTV Simple keeps serving its cached M3U/EPG until a
+  PVR data refresh or Kodi restart; automating that refresh is an open task.

@@ -3,7 +3,6 @@
 
 ADDON_ID := plugin.video.libtv
 DIST     := dist
-ZIP      := $(DIST)/$(ADDON_ID).zip
 
 .DEFAULT_GOAL := help
 .PHONY: help install test lint checker zip check clean

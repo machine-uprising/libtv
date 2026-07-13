@@ -35,16 +35,19 @@ library.
 
 ## 3. Build and install the add-on
 
-`git archive` packages **committed** state only, so commit first. From the repo:
+The build packages **committed** state only, so commit first. From the repo:
 
 ```bash
-make zip          # commits nothing for you — commit first, then build
+make zip          # → dist/plugin.video.libtv-<version>.zip
 ```
 
-(or run the raw `git archive` command in the README). Then in Kodi:
+(Never zip with `git archive --format=zip` or reuse a zip path across
+rebuilds — see the packaging gotchas in `CLAUDE.md`.) Then in Kodi:
 
 1. Settings → System → Add-ons → enable **Unknown sources**.
-2. Add-ons → **Install from zip file** → select `dist/plugin.video.libtv.zip`.
+2. Add-ons → **Install from zip file** → select the versioned zip.
+3. If reinstalling during iteration, fully restart Kodi first (zip
+   directory cache).
 
 ## 4. Wire up IPTV Simple Client
 
@@ -68,11 +71,13 @@ make zip          # commits nothing for you — commit first, then build
 - **Zap resolves and plays** — selecting a channel hits
   `?action=play&channel=libtv.movies` (or `libtv.tv`) and plays whatever the
   schedule says is on air *now*.
-- **`StartOffset` join-in-progress** — this is the unverified one. Zap to a
-  channel mid-programme and confirm playback **starts partway in**, matching how
-  far into the programme the schedule places you, not from `0:00`. The resolver
-  only sets `StartOffset` when `join_in_progress` is on and the offset exceeds
-  5 seconds (`plugin.play`).
+- **Join-in-progress** — zap to a channel mid-programme and confirm playback
+  **jumps partway in shortly after starting**, matching how far into the
+  programme the schedule places you. (Verified: Kodi *ignores* `StartOffset`
+  on resolved PVR streams, so `plugin._seek_into_programme` seeks after the
+  player opens the file — expect up to a second or two of the beginning
+  before the jump. Only happens when `join_in_progress` is on and the offset
+  exceeds 5 seconds.)
 - **Guide/playback agreement** — what the EPG shows as "now" is exactly what
   plays. Both derive from `schedule.json`; they must never disagree.
 - **Schedule stability within a day** — press **Regenerate now**, then confirm

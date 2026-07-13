@@ -21,6 +21,7 @@ import subprocess
 import sys
 import tarfile
 import time
+import xml.etree.ElementTree as ET
 import zipfile
 from pathlib import Path
 
@@ -60,9 +61,13 @@ def main():
 
     tar_bytes = run(repo, "git", "archive", "--format=tar", "HEAD")
 
+    # Versioned filename (Kodi repo convention). It also guarantees a fresh
+    # path per release: Kodi caches zip directories by path, and replacing a
+    # zip in place can serve stale entry offsets until Kodi restarts.
+    version = ET.fromstring(run(repo, "git", "show", "HEAD:addon.xml")).get("version")
     dist = repo / "dist"
     dist.mkdir(exist_ok=True)
-    zip_path = dist / f"{ADDON_ID}.zip"
+    zip_path = dist / f"{ADDON_ID}-{version}.zip"
 
     names = set()
     with tarfile.open(fileobj=io.BytesIO(tar_bytes)) as tar, \

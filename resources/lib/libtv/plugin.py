@@ -34,6 +34,46 @@ def build():
     )
 
 
+# How long to wait for playback to actually start before giving up on the
+# join-in-progress seek, and how often to poll while waiting.
+SEEK_TIMEOUT = 30.0
+SEEK_POLL = 0.25
+
+
+def _seek_into_programme(offset, file_path):
+    """Seek once playback has started, to join the programme in progress.
+
+    Kodi ignores the ListItem StartOffset property on streams resolved for
+    PVR IPTV Simple (verified on Omega), so the resolver stays alive after
+    setResolvedUrl, waits for the player to open our file, and seeks.
+    """
+    monitor = xbmc.Monitor()
+    player = xbmc.Player()
+    waited = 0.0
+    while waited < SEEK_TIMEOUT and not monitor.abortRequested():
+        if player.isPlaying():
+            try:
+                playing = player.getPlayingFile()
+                total = player.getTotalTime()
+                current = player.getTime()
+            except RuntimeError:
+                playing, total, current = None, 0, 0  # stream not fully open yet
+            if playing and playing != file_path:
+                return  # user already zapped to something else
+            if playing and total > 0:
+                # Clamp: bad runtime metadata can schedule slots longer than
+                # the actual file; never seek past (or into the last 10s of)
+                # the real duration.
+                target = min(offset, max(total - 10, 0))
+                if current < target - 5:
+                    player.seekTime(target)
+                return
+        if monitor.waitForAbort(SEEK_POLL):
+            return
+        waited += SEEK_POLL
+    xbmc.log("LibTV: gave up waiting for playback to start, no seek", xbmc.LOGWARNING)
+
+
 def play(handle, channel_id):
     now = time.time()
     data = generator.load_schedule()
@@ -49,11 +89,9 @@ def play(handle, channel_id):
         return
 
     prog, offset = found
-    li = xbmcgui.ListItem(path=prog["file"])
+    xbmcplugin.setResolvedUrl(handle, True, xbmcgui.ListItem(path=prog["file"]))
     if xbmcaddon.Addon().getSettingBool("join_in_progress") and offset > 5:
-        # Join the programme in progress, like zapping onto a real channel.
-        li.setProperty("StartOffset", str(int(offset)))
-    xbmcplugin.setResolvedUrl(handle, True, li)
+        _seek_into_programme(int(offset), prog["file"])
 
 
 def run(argv):

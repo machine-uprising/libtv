@@ -91,7 +91,7 @@ Kodi requires the folder inside the zip to match the add-on id
 (`plugin.video.libtv`). Build from committed state:
 
 ```bash
-make zip    # → dist/plugin.video.libtv.zip
+make zip    # → dist/plugin.video.libtv-<version>.zip
 ```
 
 Dev-only files (tests, Poetry config, dev container) are excluded via
@@ -101,10 +101,11 @@ rejects git's zip output (it carries an archive comment Kodi can't parse).
 
 ## Project status
 
-Working prototype: schedule generation, M3U/XMLTV output, the `plugin://`
-stream resolver, and the background refresh service are implemented and
-unit-tested, and the add-on passes `kodi-addon-checker` cleanly. Not yet
-verified inside a real Kodi + IPTV Simple setup (in particular the
-join-in-progress start offset). Channel lineup is currently fixed to two
-channels (Movies, TV Shows); configurable genre/show channels are planned.
-See `CLAUDE.md` for development constraints and known gaps.
+Working prototype, verified installing and generating inside a real Kodi:
+schedule generation, M3U/XMLTV output, the `plugin://` stream resolver, and
+the background refresh service are implemented and unit-tested, and the
+add-on passes `kodi-addon-checker` cleanly. Join-in-progress works by
+seeking right after playback starts (Kodi ignores `StartOffset` on resolved
+PVR streams). Channel lineup is currently fixed to two channels (Movies, TV
+Shows); configurable genre/show channels are planned. See `CLAUDE.md` for
+development constraints and known gaps.

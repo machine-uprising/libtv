@@ -40,12 +40,46 @@ def _execute_jsonrpc(request: str) -> str:
     return json.dumps({"jsonrpc": "2.0", "id": 1, "result": JSONRPC_RESPONSES.get(method, {})})
 
 
+# Tests mutate this to simulate the player; seekTime lands in CALLS.
+PLAYER = {"playing": False, "file": "", "time": 0.0, "total": 0.0}
+
+
 class _Monitor:
+    """Non-aborting monitor: waitForAbort returns immediately without
+    sleeping, so poll loops (e.g. the join-in-progress seek) run fast in
+    tests. Don't call daemon.run() against this fake — it would spin."""
+
     def abortRequested(self) -> bool:
-        return True
+        return False
 
     def waitForAbort(self, timeout: float = 0) -> bool:
-        return True
+        return False
+
+
+class _Player:
+    def isPlaying(self) -> bool:
+        return PLAYER["playing"]
+
+    def _require_playing(self):
+        if not PLAYER["playing"]:
+            raise RuntimeError("XBMC is not playing any file")
+
+    def getPlayingFile(self) -> str:
+        self._require_playing()
+        return PLAYER["file"]
+
+    def getTime(self) -> float:
+        self._require_playing()
+        return PLAYER["time"]
+
+    def getTotalTime(self) -> float:
+        self._require_playing()
+        return PLAYER["total"]
+
+    def seekTime(self, seconds: float) -> None:
+        self._require_playing()
+        PLAYER["time"] = seconds
+        CALLS.append(("xbmc.Player.seekTime", seconds))
 
 
 def _make_xbmc() -> types.ModuleType:
@@ -55,6 +89,7 @@ def _make_xbmc() -> types.ModuleType:
     mod.executeJSONRPC = _execute_jsonrpc
     mod.executebuiltin = lambda command: CALLS.append(("xbmc.executebuiltin", command))
     mod.Monitor = _Monitor
+    mod.Player = _Player
     return mod
 
 
@@ -156,3 +191,13 @@ for name, factory in {
     "xbmcplugin": _make_xbmcplugin,
 }.items():
     sys.modules.setdefault(name, factory())
+
+
+import pytest  # noqa: E402  (fakes must be installed before anything imports xbmc*)
+
+
+@pytest.fixture(autouse=True)
+def _reset_kodi_fakes():
+    yield
+    PLAYER.update(playing=False, file="", time=0.0, total=0.0)
+    CALLS.clear()

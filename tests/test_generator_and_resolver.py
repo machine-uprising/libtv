@@ -4,6 +4,7 @@ import json
 import os
 import runpy
 import sys
+import time
 
 from tests import conftest
 
@@ -55,8 +56,25 @@ def _run_plugin(monkeypatch, query):
     runpy.run_path("default.py", run_name="__main__")
 
 
-def test_resolver_plays_current_programme(monkeypatch):
+def _freeze_mid_programme(monkeypatch, data, seconds_in=1800):
+    """Pin time.time() to `seconds_in` past the first movie programme."""
+    start = data["channels"][0]["programmes"][0]["start"]
+    monkeypatch.setattr(time, "time", lambda: start + seconds_in)
+    return seconds_in
+
+
+def _seek_calls():
+    return [c for c in conftest.CALLS if c[0] == "xbmc.Player.seekTime"]
+
+
+def test_resolver_plays_current_programme_and_seeks(monkeypatch):
+    from libtv import generator
+
     _with_library(monkeypatch)
+    data = generator.regenerate()
+    offset = _freeze_mid_programme(monkeypatch, data, seconds_in=1800)
+    conftest.PLAYER.update(playing=True, file="/media/a.mkv", time=0.0, total=6000.0)
+
     _run_plugin(monkeypatch, "?action=play&channel=libtv.movies")
 
     resolved = [c for c in conftest.CALLS if c[0] == "xbmcplugin.setResolvedUrl"]
@@ -65,13 +83,55 @@ def test_resolver_plays_current_programme(monkeypatch):
     assert handle == 7
     assert succeeded is True
     assert listitem.path == "/media/a.mkv"
-    # Mid-programme zap must set a start offset (join in progress).
-    offset = int(listitem.properties.get("StartOffset", "0"))
-    assert 0 <= offset < 6000
+    # Kodi ignores StartOffset on resolved PVR streams, so join-in-progress
+    # is a post-start seek to the schedule offset.
+    assert _seek_calls() == [("xbmc.Player.seekTime", offset)]
+
+
+def test_resolver_seek_clamps_to_file_length(monkeypatch):
+    from libtv import generator
+
+    _with_library(monkeypatch)
+    data = generator.regenerate()
+    _freeze_mid_programme(monkeypatch, data, seconds_in=5000)
+    # File is really much shorter than the scheduled slot.
+    conftest.PLAYER.update(playing=True, file="/media/a.mkv", time=0.0, total=3000.0)
+
+    _run_plugin(monkeypatch, "?action=play&channel=libtv.movies")
+
+    assert _seek_calls() == [("xbmc.Player.seekTime", 3000.0 - 10)]
+
+
+def test_resolver_skips_seek_when_disabled(monkeypatch):
+    from libtv import generator
+
+    _with_library(monkeypatch)
+    data = generator.regenerate()
+    _freeze_mid_programme(monkeypatch, data, seconds_in=1800)
+    conftest.PLAYER.update(playing=True, file="/media/a.mkv", time=0.0, total=6000.0)
+    monkeypatch.setitem(conftest.SETTINGS, "join_in_progress", "false")
+
+    _run_plugin(monkeypatch, "?action=play&channel=libtv.movies")
+
+    assert _seek_calls() == []
+
+
+def test_resolver_skips_seek_when_user_zapped_away(monkeypatch):
+    from libtv import generator
+
+    _with_library(monkeypatch)
+    data = generator.regenerate()
+    _freeze_mid_programme(monkeypatch, data, seconds_in=1800)
+    conftest.PLAYER.update(playing=True, file="/media/other.mkv", time=0.0, total=6000.0)
+
+    _run_plugin(monkeypatch, "?action=play&channel=libtv.movies")
+
+    assert _seek_calls() == []
 
 
 def test_resolver_fails_cleanly_for_unknown_channel(monkeypatch):
     _with_library(monkeypatch)
+    conftest.PLAYER.update(playing=False, file="", time=0.0, total=0.0)
     _run_plugin(monkeypatch, "?action=play&channel=libtv.nope")
 
     resolved = [c for c in conftest.CALLS if c[0] == "xbmcplugin.setResolvedUrl"]
