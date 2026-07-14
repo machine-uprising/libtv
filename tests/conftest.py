@@ -29,14 +29,21 @@ SETTINGS = {
     "epg_hours": "24",
     "regen_interval_hours": "6",
     "join_in_progress": "true",
+    "refresh_pvr": "true",
 }
 
 # Calls recorded by fakes, for assertions: list of (module.func, args) tuples.
 CALLS: list[tuple] = []
 
+# Queued dialog answers, popped FIFO per method; empty queue = cancel-ish
+# defaults (select -1, multiselect None, input "", yesno False).
+DIALOG_RESPONSES: dict[str, list] = {"select": [], "multiselect": [], "input": [], "yesno": []}
+
 
 def _execute_jsonrpc(request: str) -> str:
-    method = json.loads(request)["method"]
+    parsed = json.loads(request)
+    method = parsed["method"]
+    CALLS.append(("xbmc.executeJSONRPC", method, parsed.get("params", {})))
     return json.dumps({"jsonrpc": "2.0", "id": 1, "result": JSONRPC_RESPONSES.get(method, {})})
 
 
@@ -85,6 +92,7 @@ def _make_xbmc() -> types.ModuleType:
     mod = types.ModuleType("xbmc")
     mod.LOGDEBUG, mod.LOGINFO, mod.LOGWARNING, mod.LOGERROR = 0, 1, 2, 3
     mod.log = lambda msg, level=1: None
+    mod.sleep = lambda ms: None
     mod.executeJSONRPC = _execute_jsonrpc
     mod.executebuiltin = lambda command: CALLS.append(("xbmc.executebuiltin", command))
     mod.Monitor = _Monitor
@@ -139,9 +147,30 @@ def _make_xbmcaddon() -> types.ModuleType:
     return mod
 
 
+def _dialog_answer(method: str, default):
+    queue = DIALOG_RESPONSES[method]
+    return queue.pop(0) if queue else default
+
+
 class _Dialog:
     def notification(self, heading, message, icon=None, time=5000, sound=True) -> None:
         CALLS.append(("xbmcgui.notification", heading, message))
+
+    def select(self, heading, options, autoclose=0, preselect=-1, useDetails=False) -> int:
+        CALLS.append(("xbmcgui.select", heading, list(options)))
+        return _dialog_answer("select", -1)
+
+    def multiselect(self, heading, options, autoclose=0, preselect=None, useDetails=False):
+        CALLS.append(("xbmcgui.multiselect", heading, list(options)))
+        return _dialog_answer("multiselect", None)
+
+    def input(self, heading, defaultt="", type=0, option=0, autoclose=0) -> str:
+        CALLS.append(("xbmcgui.input", heading, defaultt))
+        return _dialog_answer("input", "")
+
+    def yesno(self, heading, message, nolabel="", yeslabel="", autoclose=0) -> bool:
+        CALLS.append(("xbmcgui.yesno", heading, message))
+        return _dialog_answer("yesno", False)
 
 
 class _ListItem:
@@ -165,6 +194,8 @@ def _make_xbmcgui() -> types.ModuleType:
     mod.Dialog = _Dialog
     mod.ListItem = _ListItem
     mod.NOTIFICATION_INFO = "info"
+    mod.INPUT_ALPHANUM = 0
+    mod.INPUT_NUMERIC = 1
     return mod
 
 
@@ -201,5 +232,11 @@ def _reset_kodi_fakes():
     from libtv import generator
 
     generator.clear_pending_seek()
+    try:
+        os.remove(generator.channels_path())
+    except OSError:
+        pass
     PLAYER.update(playing=False, file="", time=0.0, total=0.0)
     CALLS.clear()
+    for queue in DIALOG_RESPONSES.values():
+        queue.clear()

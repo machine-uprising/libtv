@@ -32,19 +32,31 @@ midnight UTC, and when you zap to a channel it resolves to whatever is on air
 *right now*, joining the programme in progress. The XMLTV guide is rendered
 from the same schedule, so the guide and playback always agree.
 
+- **Custom channels**: out of the box you get two channels (all Movies, all
+  TV Shows), and **Manage channels** (in the add-on menu and settings) lets
+  you build your own — movie or TV-show channels filtered by genre, studio,
+  and production years, with full control over channel names and order.
+- After every rebuild LibTV automatically reloads IPTV Simple (unless
+  something is playing), so lineup and guide changes show up without
+  restarting Kodi.
 - `service.py` runs in the background: regenerates the schedule and files at
-  login and on a configurable interval.
-- `default.py` provides the add-on menu (rebuild channels, open settings) and
-  the stream resolver.
-- `resources/lib/libtv/` holds the actual logic; the schedule building and
-  file rendering are pure Python and fully unit-tested.
+  login and on a configurable interval, and performs the join-in-progress
+  seek when a channel starts playing.
+- `default.py` provides the add-on menu (manage channels, rebuild, settings)
+  and the stream resolver.
+- `resources/lib/libtv/` holds the actual logic; the schedule building,
+  channel configuration, and file rendering are pure Python and fully
+  unit-tested.
 - Settings: max items per channel, shuffle, guide length, refresh interval,
-  join-in-progress.
+  join-in-progress, automatic guide refresh.
+
+The full design — component map, schedule model, file formats, and the
+tune/seek sequence — is documented in [`docs/architecture.md`](docs/architecture.md).
 
 ## Installation
 
 1. Build the zip (see below) or download a release.
-2. Kodi → Add-ons → Install from zip file → select `plugin.video.libtv.zip`.
+2. Kodi → Add-ons → Install from zip file → select `plugin.video.libtv-<version>.zip`.
 3. Install and enable **PVR IPTV Simple Client**, then point it at the
    generated files in the add-on profile directory
    (`userdata/addon_data/plugin.video.libtv/`):
@@ -106,6 +118,8 @@ schedule generation, M3U/XMLTV output, the `plugin://` stream resolver, and
 the background refresh service are implemented and unit-tested, and the
 add-on passes `kodi-addon-checker` cleanly. Join-in-progress works by
 seeking right after playback starts (Kodi ignores `StartOffset` on resolved
-PVR streams). Channel lineup is currently fixed to two channels (Movies, TV
-Shows); configurable genre/show channels are planned. See `CLAUDE.md` for
-development constraints and known gaps.
+PVR streams). Custom channels (genre/studio/year filters, rename, reorder)
+and the automatic post-rebuild guide refresh are implemented and unit-tested
+but still awaiting live verification in a real Kodi (see
+`docs/live-testing.md`). See `CLAUDE.md` for development constraints and
+known gaps.

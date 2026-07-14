@@ -17,6 +17,11 @@
                     <default>true</default>
                     <control type="toggle"/>
                 </setting>
+                <setting id="manage_channels" type="action" label="32110" help="">
+                    <level>0</level>
+                    <data>ActivateWindow(Videos,plugin://plugin.video.libtv/?action=channels,return)</data>
+                    <control type="button" format="action"/>
+                </setting>
             </group>
             <group id="2" label="32104">
                 <setting id="epg_hours" type="integer" label="32105" help="">
@@ -38,6 +43,11 @@
                     <control type="slider" format="integer"/>
                 </setting>
                 <setting id="join_in_progress" type="boolean" label="32107" help="">
+                    <level>0</level>
+                    <default>true</default>
+                    <control type="toggle"/>
+                </setting>
+                <setting id="refresh_pvr" type="boolean" label="32109" help="">
                     <level>0</level>
                     <default>true</default>
                     <control type="toggle"/>

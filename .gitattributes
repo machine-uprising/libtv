@@ -1,5 +1,6 @@
 # Files excluded from the add-on zip built with `make zip`
 # (scripts/build_zip.py, which repacks `git archive --format=tar HEAD`)
+.claude export-ignore
 .devcontainer export-ignore
 docs export-ignore
 scripts export-ignore

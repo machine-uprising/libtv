@@ -43,6 +43,9 @@ class JoinInProgressPlayer(xbmc.Player):
 def _regenerate_safely():
     try:
         generator.regenerate()
+        # IPTV Simple serves cached data until reloaded; refresh_pvr skips
+        # itself during playback so a running stream is never interrupted.
+        generator.refresh_pvr()
     except Exception as exc:  # never let one bad run kill the service
         xbmc.log(f"LibTV: generation failed: {exc}", xbmc.LOGERROR)
 

@@ -219,6 +219,9 @@ __marimo__/
 .streamlit/secrets.toml
 
 
+# Claude Code local (per-machine) settings
+.claude/settings.local.json
+
 # Kodi add-on specific
 userdata/
 *.pyc

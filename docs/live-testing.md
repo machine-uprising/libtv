@@ -3,8 +3,8 @@
 Unit tests (`poetry run pytest`) exercise schedule building and M3U/XMLTV
 rendering against faked `xbmc*` modules. They **cannot** verify anything that
 only exists inside a running Kodi: JSON-RPC against a real library, IPTV Simple
-Client ingesting the guide, stream resolution, and the `StartOffset`
-join-in-progress behaviour. That verification requires a real Kodi instance.
+Client ingesting the guide, stream resolution, and the join-in-progress
+seek. That verification requires a real Kodi instance.
 This document is the checklist for doing it.
 
 ## 1. Get a Kodi you can reach
@@ -62,8 +62,9 @@ rebuilds — see the packaging gotchas in `CLAUDE.md`.) Then in Kodi:
 4. Configure IPTV Simple:
    - **General → M3U Play List** → path to `channels.m3u` (local file).
    - **EPG Settings → XMLTV** → path to `guide.xmltv`.
-5. Open Kodi's **TV** section. The two channels (Movies, TV Shows) should
-   appear with a populated guide.
+5. Open Kodi's **TV** section. The two default channels (Movies, TV Shows) —
+   plus any custom channels from `channels.json` — should appear with a
+   populated guide.
 
 ## 5. What to verify (the things unit tests can't)
 
@@ -85,6 +86,30 @@ rebuilds — see the packaging gotchas in `CLAUDE.md`.) Then in Kodi:
 - **Schedule stability within a day** — press **Regenerate now**, then confirm
   what was on air a minute ago did not retroactively change (channels anchor at
   midnight UTC with a `channel_id:anchor` seed).
+- **Guide refreshes after a rebuild (no Kodi restart)** — with nothing
+  playing, press **Regenerate now** and confirm the TV guide reflects the new
+  data within a few seconds. The refresh works by toggling IPTV Simple off/on;
+  the log line to look for is
+  `LibTV: toggled IPTV Simple to reload channels and guide`. Expect a brief
+  PVR "importing channels" flash — that is the reload happening.
+- **Refresh is skipped during playback** — rebuild while a stream is playing:
+  playback must NOT be interrupted, the notification reads
+  "Channels rebuilt — guide refresh skipped", and the log shows
+  `LibTV: playback active, skipping PVR refresh`.
+- **Channel management UI** — open **Manage channels** (add-on menu or the
+  settings button). Verify each command item actually runs its dialog flow
+  when clicked (the items are non-folder command items that end with
+  `Container.Refresh` — a pattern that needs real-Kodi confirmation):
+  - **Add** a channel (e.g. Movies, one genre, a year range) → it appears in
+    the list, in `channels.json`, and — after the automatic rebuild+refresh —
+    in the TV guide with only matching items scheduled.
+  - **Rename** → guide shows the new name on the *same* channel
+    (`channels.json` id unchanged).
+  - **Move up/down** → channel order changes in the guide after refresh.
+  - **Delete** (with confirmation) → channel gone from the guide.
+  - Filter counts sanity: spot-check a genre/studio/year channel's programmes
+    against the library (filters run in Kodi's DB via `List.Filter`; the
+    unit tests only verify the filter JSON we send).
 
 ## 6. Sanity-check the library over JSON-RPC
 

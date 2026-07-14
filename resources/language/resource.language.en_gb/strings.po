@@ -44,3 +44,11 @@ msgstr ""
 msgctxt "#32108"
 msgid "Regenerate channels now"
 msgstr ""
+
+msgctxt "#32109"
+msgid "Refresh guide after rebuild (restarts IPTV Simple)"
+msgstr ""
+
+msgctxt "#32110"
+msgid "Manage channels"
+msgstr ""

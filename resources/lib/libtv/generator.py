@@ -9,15 +9,19 @@ import xbmc
 import xbmcaddon
 import xbmcvfs
 
-from libtv import library, schedule, writers
+from libtv import channels, library, schedule, writers
 
 M3U_NAME = "channels.m3u"
 XMLTV_NAME = "guide.xmltv"
 SCHEDULE_NAME = "schedule.json"
+CHANNELS_NAME = "channels.json"
 PENDING_SEEK_NAME = "pending_seek.json"
 
 # A pending seek older than this is abandoned (playback never started).
 PENDING_SEEK_MAX_AGE = 120
+
+# The PVR client that consumes our M3U/XMLTV output.
+PVR_CLIENT = "pvr.iptvsimple"
 
 
 def profile_dir():
@@ -30,6 +34,19 @@ def profile_dir():
 
 def schedule_path():
     return os.path.join(profile_dir(), SCHEDULE_NAME)
+
+
+def channels_path():
+    return os.path.join(profile_dir(), CHANNELS_NAME)
+
+
+def load_channel_defs():
+    """Channel definitions from channels.json (default lineup if absent)."""
+    return channels.load(channels_path())
+
+
+def save_channel_defs(definitions):
+    channels.save(channels_path(), definitions)
 
 
 def _int_setting(addon, setting_id, default):
@@ -56,15 +73,15 @@ def regenerate():
     epg_hours = _int_setting(addon, "epg_hours", 24)
     shuffle = addon.getSettingBool("shuffle")
 
-    channels = library.fetch_channels(max_items)
+    lineup = library.fetch_channels(load_channel_defs(), max_items)
 
     now = time.time()
     anchor = schedule.day_anchor(now)
     if shuffle:
-        for ch in channels:
+        for ch in lineup:
             ch["items"] = schedule.shuffled(ch["id"], ch["items"], anchor)
 
-    data = schedule.build_schedule(channels, anchor, now + epg_hours * 3600)
+    data = schedule.build_schedule(lineup, anchor, now + epg_hours * 3600)
 
     prof = profile_dir()
     with open(os.path.join(prof, M3U_NAME), "w", encoding="utf-8") as f:
@@ -80,6 +97,33 @@ def regenerate():
         xbmc.LOGINFO,
     )
     return data
+
+
+def refresh_pvr():
+    """Make IPTV Simple reload the regenerated M3U/EPG. Returns True if done.
+
+    The client has no reload API, so toggle it off and on over JSON-RPC —
+    the PVR manager then restarts it and it re-reads both files. Never do
+    this while something is playing (it would kill the stream), and never
+    call it from the stream resolver (a toggle mid-tune aborts the tune) —
+    only from the manual build action and the service loop.
+    """
+    if not xbmcaddon.Addon().getSettingBool("refresh_pvr"):
+        return False
+    if xbmc.Player().isPlaying():
+        xbmc.log("LibTV: playback active, skipping PVR refresh", xbmc.LOGINFO)
+        return False
+    details = library.json_rpc(
+        "Addons.GetAddonDetails", {"addonid": PVR_CLIENT, "properties": ["enabled"]}
+    )
+    if not details.get("addon", {}).get("enabled"):
+        xbmc.log(f"LibTV: {PVR_CLIENT} not installed/enabled, skipping PVR refresh", xbmc.LOGINFO)
+        return False
+    library.json_rpc("Addons.SetAddonEnabled", {"addonid": PVR_CLIENT, "enabled": False})
+    xbmc.sleep(500)
+    library.json_rpc("Addons.SetAddonEnabled", {"addonid": PVR_CLIENT, "enabled": True})
+    xbmc.log("LibTV: toggled IPTV Simple to reload channels and guide", xbmc.LOGINFO)
+    return True
 
 
 def load_schedule():

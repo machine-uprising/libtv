@@ -18,21 +18,41 @@ in the profile dir → IPTV Simple Client. Each M3U entry is a
 resolver looks up what the schedule says is on air *now* and resolves to that
 file with a `StartOffset`, so zapping joins programmes in progress.
 
+**`docs/architecture.md` is the canonical design document** — component map,
+schedule model, file formats, the tune/seek sequence, settings, invariants.
+Read it before changing behavior; update it as part of any change that alters
+the design.
+
+## Documentation discipline
+
+Every change lands fully documented in the same change. At the end of any
+change touching runtime code, settings, packaging, or workflow, run the
+`document-changes` skill (`.claude/skills/document-changes/SKILL.md`) and
+work through its checklist — it maps which document owns what.
+
 ## Layout
 
 - `addon.xml` — manifest; extension points define how Kodi invokes the code
 - `default.py` / `service.py` — thin entry shims only (see constraint below);
   they add `resources/lib` to `sys.path` and delegate
 - `resources/lib/libtv/` — the actual code:
-  - `schedule.py`, `writers.py` — **pure logic, no Kodi imports** (keep it that way)
-  - `library.py` — JSON-RPC library queries
-  - `generator.py` — orchestration: build schedule, write M3U/XMLTV/schedule.json
+  - `schedule.py`, `writers.py`, `channels.py` — **pure logic, no Kodi
+    imports** (keep it that way); `channels.py` owns the channel-lineup
+    config (`channels.json`) and JSON-RPC filter building
+  - `library.py` — JSON-RPC library queries (filtered per channel definition)
+  - `generator.py` — orchestration: build schedule, write
+    M3U/XMLTV/schedule.json, PVR refresh (`refresh_pvr`)
   - `plugin.py` — menu + stream resolver (`play` = the linear-TV core)
+  - `manage.py` — dialog-driven channel management UI
   - `daemon.py` — background regeneration loop (`xbmc.Monitor`-based)
 - `resources/settings.xml` — new-format (`version="1"`) settings; labels are
   msgid numbers resolved via `resources/language/resource.language.en_gb/strings.po`
 - `tests/conftest.py` — hand-rolled fake `xbmc*` modules that make the add-on
   importable outside Kodi
+- `docs/` — `architecture.md` (canonical design), `live-testing.md`
+  (real-Kodi verification checklist)
+- `scripts/` — dev-only helpers: `build_zip.py` (packaging), `sanity_check.py`
+  (library sanity over HTTP JSON-RPC)
 
 ## Commands
 
@@ -118,8 +138,16 @@ trees and verifies the built zip contains the key add-on files.
 - **`schedule.json` is the contract between generator and resolver.** The
   XMLTV guide, the M3U, and playback resolution all derive from the same
   persisted schedule; never compute "what's on" from anything else.
-- Keep `schedule.py` and `writers.py` free of Kodi imports so the core stays
-  unit-testable.
+- Keep `schedule.py`, `writers.py`, and `channels.py` free of Kodi imports so
+  the core stays unit-testable.
+- **Channel ids are permanent.** Renames and reorders in the management UI
+  must never change a channel's id — the deterministic shuffle seed and the
+  PVR channel identity both key off it.
+- **PVR refresh (IPTV Simple toggle) may only run from the manual build
+  action and the service loop.** The resolver also regenerates (on schedule
+  miss), but toggling `pvr.iptvsimple` mid-tune aborts the tune, and toggling
+  during any playback kills the stream — `generator.refresh_pvr()` guards on
+  `Player().isPlaying()` and must keep doing so.
 
 ## Testing approach
 
@@ -153,8 +181,9 @@ see `docs/live-testing.md` for the checklist.
 ## Known gaps (as of 2026-07)
 
 - No icon/fanart assets yet (checker suggests adding them).
-- Channel lineup is hardcoded to two channels (all movies / all episodes) in
-  `library.fetch_channels`; genre- or show-based configurable channels are the
-  next feature.
-- After regeneration, IPTV Simple keeps serving its cached M3U/EPG until a
-  PVR data refresh or Kodi restart; automating that refresh is an open task.
+- When the post-rebuild PVR refresh is skipped because something is playing,
+  the guide stays stale until a later regen cycle finds Kodi idle (no
+  deferred retry).
+- The channel management UI (custom channels, filters, reorder) and the
+  PVR-toggle refresh are unit-tested but not yet live-verified in a real
+  Kodi — see the new items in `docs/live-testing.md`.
