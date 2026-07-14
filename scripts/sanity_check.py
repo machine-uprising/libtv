@@ -32,9 +32,12 @@ import urllib.request
 
 # Mirror resources/lib/libtv/library.py so we check exactly what the add-on
 # reads. Keep these in sync if the add-on's property lists change.
-MOVIE_PROPS = ["title", "file", "runtime", "plot", "genre"]
+# streamdetails matters: Kodi only fills episode `runtime` from stream
+# details when streamdetails is also requested.
+MOVIE_PROPS = ["title", "file", "runtime", "plot", "genre", "streamdetails"]
 EPISODE_PROPS = [
     "title", "file", "runtime", "plot", "showtitle", "season", "episode", "genre",
+    "streamdetails",
 ]
 
 # A real feature/episode runtime in seconds is comfortably above this. A value
@@ -69,6 +72,14 @@ def jsonrpc(args, method, params=None):
     return body.get("result", {})
 
 
+def effective_runtime(item):
+    """Mirror library.py's fallback: runtime, else stream-details duration."""
+    if item.get("runtime"):
+        return item["runtime"]
+    video = (item.get("streamdetails") or {}).get("video") or [{}]
+    return video[0].get("duration") or 0
+
+
 def check_kind(args, label, method, key, props):
     result = jsonrpc(args, method, {"properties": props})
     items = result.get(key, [])
@@ -90,7 +101,7 @@ def check_kind(args, label, method, key, props):
 
     suspect = [
         it for it in items
-        if isinstance(it.get("runtime"), int) and 0 < it["runtime"] < MIN_PLAUSIBLE_SECONDS
+        if 0 < effective_runtime(it) < MIN_PLAUSIBLE_SECONDS
     ]
     if suspect:
         sample = suspect[0]
@@ -98,11 +109,11 @@ def check_kind(args, label, method, key, props):
             "{} item(s) have runtime < {}s -- looks like MINUTES not seconds "
             "(e.g. '{}' runtime={})".format(
                 len(suspect), MIN_PLAUSIBLE_SECONDS,
-                sample.get("title", "?"), sample.get("runtime"),
+                sample.get("title", "?"), effective_runtime(sample),
             )
         )
 
-    zero_runtime = [it for it in items if not it.get("runtime")]
+    zero_runtime = [it for it in items if not effective_runtime(it)]
     if zero_runtime:
         problems.append(
             f"{len(zero_runtime)} item(s) have no runtime -> scheduled at the 90-min default"

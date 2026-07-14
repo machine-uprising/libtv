@@ -53,6 +53,10 @@ work through its checklist — it maps which document owns what.
   (real-Kodi verification checklist)
 - `scripts/` — dev-only helpers: `build_zip.py` (packaging), `sanity_check.py`
   (library sanity over HTTP JSON-RPC)
+- `.claude/` — Claude Code project config (committed, excluded from the zip):
+  `skills/document-changes` (doc-sync checklist), `skills/deploy-to-kodi`
+  (release gate for the live Kodi), `hooks/protect-kodi-addons.py` +
+  `settings.json` (PreToolUse hook denying writes to the installed add-on)
 
 ## Commands
 
@@ -97,6 +101,25 @@ trees and verifies the built zip contains the key add-on files.
   `<id>-<version>.zip` so releases land on fresh paths; when iterating on
   the same version, restart Kodi between install attempts.
 
+## The live Kodi is production — never modify it in place
+
+The Kodi instance on the Windows host runs the deployed add-on
+(`%APPDATA%\Kodi\addons\plugin.video.libtv\`, from WSL
+`/mnt/c/Users/Dave/AppData/Roaming/Kodi/addons/plugin.video.libtv/`).
+**Never edit, copy, or symlink files into that directory** — no "fast
+iteration" hot-patching, even for a one-file fix. Hot-patched code also
+diverges from what the long-lived service holds in memory, so the running
+system ends up in a state that matches neither the repo nor the release.
+
+The only deployment path is: commit → `make zip` → install the versioned
+zip in Kodi → restart Kodi. Run the `deploy-to-kodi` skill
+(`.claude/skills/deploy-to-kodi/SKILL.md`) whenever a change needs to reach
+the live instance; it walks the full gate.
+
+Interacting with the live Kodi read-only (JSON-RPC queries, reading logs,
+inspecting profile-dir artifacts under `userdata/addon_data/`) is fine and
+encouraged for diagnosis.
+
 ## Hard constraints — Kodi runtime
 
 - **`xbmc`, `xbmcaddon`, `xbmcgui`, `xbmcplugin`, `xbmcvfs` exist only inside
@@ -113,6 +136,14 @@ trees and verifies the built zip contains the key add-on files.
   removed in Kodi 19. The test fakes deliberately omit it so regressions fail.
 - **JSON-RPC `runtime` values are in SECONDS**, not minutes (a classic Kodi
   trap — the original prototype got this wrong).
+- **`VideoLibrary.GetEpisodes` returns `runtime: 0` unless `streamdetails`
+  is also in the requested properties** (verified live on Omega/Windows,
+  against a library where the Kodi UI showed correct durations). Kodi only
+  fills episode `runtime` from the file's stream details when they're
+  requested, and episode scrapers often set no runtime at all — dropping
+  `streamdetails` from `library.py`'s property lists silently reverts every
+  episode to the 90-minute default slot and breaks the join-in-progress
+  seek. `scripts/sanity_check.py` mirrors the property lists; keep in sync.
 - `default.py` and `service.py` must stay ≤15 counted lines
   (kodi-addon-checker "complex entry point" rule) — logic goes in
   `resources/lib/libtv/`.

@@ -95,7 +95,9 @@ poetry run kodi-addon-checker --branch omega .  # validate add-on structure
 the M3U/XMLTV generation logic is unit-testable in plain Python. Integration
 behavior (does IPTV Simple pick up the guide, does zapping work) must be
 verified in a running Kodi — install the built zip into a local Kodi and
-check the Live TV section.
+check the Live TV section. The running Kodi is treated as production: changes
+reach it only via commit → `make zip` → install the versioned zip → restart,
+never by editing the installed add-on in place (see `docs/live-testing.md`).
 
 ### Building the installable zip
 
@@ -118,7 +120,9 @@ schedule generation, M3U/XMLTV output, the `plugin://` stream resolver, and
 the background refresh service are implemented and unit-tested, and the
 add-on passes `kodi-addon-checker` cleanly. Join-in-progress works by
 seeking right after playback starts (Kodi ignores `StartOffset` on resolved
-PVR streams). Custom channels (genre/studio/year filters, rename, reorder)
+PVR streams). Episode durations come from the library's stream details
+(v0.3.1) — without them, episode scrapers that omit runtimes caused uniform
+90-minute guide slots. Custom channels (genre/studio/year filters, rename, reorder)
 and the automatic post-rebuild guide refresh are implemented and unit-tested
 but still awaiting live verification in a real Kodi (see
 `docs/live-testing.md`). See `CLAUDE.md` for development constraints and

@@ -44,7 +44,7 @@ inputs for Kodi's native PVR stack and resolves streams on demand:
 | `resources/lib/libtv/schedule.py` | **Pure.** Schedule building and lookup. No Kodi imports. |
 | `resources/lib/libtv/writers.py` | **Pure.** Renders M3U and XMLTV strings from a schedule dict. |
 | `resources/lib/libtv/channels.py` | **Pure.** Channel-lineup configuration: `channels.json` load/save, default lineup, id allocation, reorder, and JSON-RPC filter building. |
-| `resources/lib/libtv/library.py` | Kodi JSON-RPC library queries (`VideoLibrary.GetMovies` / `GetEpisodes`, filtered per channel definition) plus genre/studio pickers for the management UI. |
+| `resources/lib/libtv/library.py` | Kodi JSON-RPC library queries (`VideoLibrary.GetMovies` / `GetEpisodes`, filtered per channel definition) plus genre/studio pickers for the management UI. Resolves each item's runtime, falling back to stream-details duration (§4). |
 | `resources/lib/libtv/generator.py` | Orchestration: fetch → schedule → write all artifacts. Owns the profile directory, the pending-seek handoff files, and the PVR refresh (`refresh_pvr`). |
 | `resources/lib/libtv/plugin.py` | Plugin routing: menu, build action, and the stream resolver (`play`). |
 | `resources/lib/libtv/manage.py` | Dialog-driven channel management UI (add/rename/filter/reorder/delete). |
@@ -107,9 +107,16 @@ Built in `schedule.build_schedule`, persisted as `schedule.json`.
   `random.Random(f"{channel_id}:{anchor}")` (`schedule.shuffled`). Same
   channel + same day ⇒ same order. **Invariant: regenerating during the day
   must never change what is currently on air.**
-- **Runtimes are SECONDS** (Kodi JSON-RPC convention). Missing runtime ⇒
-  90 min default; runtimes under 5 min are clamped up to 5 min
-  (`DEFAULT_RUNTIME`, `MIN_RUNTIME`).
+- **Runtimes are SECONDS** (Kodi JSON-RPC convention). `library.py` must
+  request the `streamdetails` property alongside `runtime`: Kodi only fills
+  an episode's `runtime` from the file's stream details when stream details
+  are requested, and episode scrapers often provide no runtime at all —
+  without it, whole shows come back `runtime: 0` (verified live; the Kodi UI
+  still shows the correct duration, hiding the problem). `library._resolve_runtime`
+  additionally falls back to `streamdetails.video[0].duration` explicitly and
+  strips the blob before scheduling. Runtime still missing ⇒ 90 min default;
+  runtimes under 5 min are clamped up to 5 min (`DEFAULT_RUNTIME`,
+  `MIN_RUNTIME`).
 - **Lookup**: `schedule.find_current(data, channel_id, now)` returns
   `(programme, offset_seconds)` or `None` (unknown channel / schedule doesn't
   cover `now`).
@@ -258,6 +265,10 @@ default in `tests/conftest.py` `SETTINGS`.
   self-checks the contents. Kodi rejects `git archive --format=zip` output.
 - Dev toolchain (Poetry, pytest, ruff, kodi-addon-checker) never ships;
   runtime code is stdlib-only and Python 3.8 compatible (Kodi 19 floor).
+- **The live Kodi's installed add-on directory is production** — code reaches
+  it only through this release path (commit → zip → install → restart), never
+  by copying files in directly. The rule, its rationale, and the enforcement
+  hook live in `CLAUDE.md`; the `deploy-to-kodi` skill walks the gate.
 
 ## 11. Known gaps / roadmap
 

@@ -7,8 +7,16 @@ import xbmc
 
 from libtv import channels
 
-MOVIE_PROPS = ["title", "file", "runtime", "plot", "genre"]
-EPISODE_PROPS = ["title", "file", "runtime", "plot", "showtitle", "season", "episode", "genre"]
+# "streamdetails" must stay in these lists even though the values are only
+# used as a fallback: Kodi fills `runtime` from stream details ONLY when
+# streamdetails is also requested. Episode scrapers often provide no runtime
+# at all, so without it GetEpisodes returns runtime=0 for whole shows and
+# every episode gets scheduled at the 90-minute default (live-verified).
+MOVIE_PROPS = ["title", "file", "runtime", "plot", "genre", "streamdetails"]
+EPISODE_PROPS = [
+    "title", "file", "runtime", "plot", "showtitle", "season", "episode", "genre",
+    "streamdetails",
+]
 
 # channel type -> (method, result key, properties)
 _MEDIA = {
@@ -26,6 +34,20 @@ def json_rpc(method, params=None):
     return response.get("result", {})
 
 
+def _resolve_runtime(item):
+    """Fill a missing/zero runtime from stream details, then drop them.
+
+    Requesting streamdetails normally makes Kodi return the extracted file
+    duration as `runtime` already; this explicit fallback covers versions
+    that don't, and keeps the bulky streamdetails blob out of the schedule.
+    """
+    details = item.pop("streamdetails", None) or {}
+    if not item.get("runtime"):
+        video = details.get("video") or [{}]
+        item["runtime"] = video[0].get("duration") or 0
+    return item
+
+
 def fetch_channels(definitions, max_items):
     """Query the library per channel definition and return raw channel
     definitions (unscheduled). Filters run server-side in Kodi's database."""
@@ -37,6 +59,7 @@ def fetch_channels(definitions, max_items):
         if filt:
             params["filter"] = filt
         items = json_rpc(method, params).get(key, [])[:max_items]
+        items = [_resolve_runtime(item) for item in items]
         out.append({
             "id": defn["id"],
             "name": defn["name"],
