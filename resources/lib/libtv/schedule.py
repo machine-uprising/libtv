@@ -48,6 +48,25 @@ def _programme(item, start):
     for key in ("showtitle", "season", "episode"):
         if item.get(key) not in (None, ""):
             prog[key] = item[key]
+    # Movies report `year`; episodes report `firstaired` (an air date) —
+    # normalize both to a single "year" field for the XMLTV <date> element.
+    year = item.get("year") or (str(item["firstaired"])[:4] if item.get("firstaired") else None)
+    if year:
+        prog["year"] = year
+    if item.get("mpaa"):
+        prog["mpaa"] = item["mpaa"]
+    if item.get("director"):
+        prog["director"] = list(item["director"])
+    if item.get("cast"):
+        prog["cast"] = item["cast"]
+    if item.get("thumbnail"):
+        prog["icon"] = item["thumbnail"]
+    if item.get("rating"):
+        prog["rating"] = item["rating"]
+    # playcount is only meaningful if the library actually reported it —
+    # absence (not requested / older Kodi) must not be mistaken for "unwatched".
+    if item.get("playcount") is not None:
+        prog["playcount"] = item["playcount"]
     return prog
 
 

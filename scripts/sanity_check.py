@@ -34,10 +34,13 @@ import urllib.request
 # reads. Keep these in sync if the add-on's property lists change.
 # streamdetails matters: Kodi only fills episode `runtime` from stream
 # details when streamdetails is also requested.
-MOVIE_PROPS = ["title", "file", "runtime", "plot", "genre", "streamdetails"]
+MOVIE_PROPS = [
+    "title", "file", "runtime", "plot", "genre", "year", "mpaa", "director", "cast",
+    "thumbnail", "streamdetails", "rating", "playcount",
+]
 EPISODE_PROPS = [
     "title", "file", "runtime", "plot", "showtitle", "season", "episode", "genre",
-    "streamdetails",
+    "firstaired", "director", "cast", "thumbnail", "streamdetails", "rating", "playcount",
 ]
 
 # A real feature/episode runtime in seconds is comfortably above this. A value

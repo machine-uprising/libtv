@@ -22,6 +22,16 @@
                     <data>ActivateWindow(Videos,plugin://plugin.video.libtv/?action=channels,return)</data>
                     <control type="button" format="action"/>
                 </setting>
+                <setting id="autotune_channels" type="action" label="32111" help="">
+                    <level>0</level>
+                    <data>RunPlugin(plugin://plugin.video.libtv/?action=autotune)</data>
+                    <control type="button" format="action"/>
+                </setting>
+                <setting id="autotune_studio_channels" type="action" label="32112" help="">
+                    <level>0</level>
+                    <data>RunPlugin(plugin://plugin.video.libtv/?action=autotune_studio)</data>
+                    <control type="button" format="action"/>
+                </setting>
             </group>
             <group id="2" label="32104">
                 <setting id="epg_hours" type="integer" label="32105" help="">

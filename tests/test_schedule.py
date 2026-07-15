@@ -49,6 +49,45 @@ def test_build_schedule_runtime_fallbacks():
     assert second["stop"] - second["start"] == schedule.MIN_RUNTIME
 
 
+def test_build_schedule_carries_through_enrichment_fields():
+    channels = [{
+        "id": "c", "name": "C", "items": [
+            {"title": "Movie A", "file": "/a.mkv", "runtime": 6000, "year": 1985,
+             "mpaa": "PG-13", "director": ["Dir A"],
+             "cast": [{"name": "Actor A", "role": "Hero"}], "thumbnail": "http://x/thumb.jpg",
+             "rating": 8.7, "playcount": 0},
+            {"title": "Ep 1", "file": "/b.mkv", "runtime": 1800, "firstaired": "2020-05-01",
+             "playcount": 2},
+        ],
+    }]
+    data = schedule.build_schedule(channels, ANCHOR, ANCHOR + 6000 + 1)
+    movie, episode = data["channels"][0]["programmes"][:2]
+
+    assert movie["year"] == 1985
+    assert movie["mpaa"] == "PG-13"
+    assert movie["director"] == ["Dir A"]
+    assert movie["cast"] == [{"name": "Actor A", "role": "Hero"}]
+    assert movie["icon"] == "http://x/thumb.jpg"
+    assert movie["rating"] == 8.7
+    assert movie["playcount"] == 0
+    # Episodes have no `year`, only `firstaired` — normalized to the year.
+    assert episode["year"] == "2020"
+    assert episode["playcount"] == 2
+    assert "mpaa" not in episode
+    assert "rating" not in episode
+
+
+def test_build_schedule_omits_playcount_when_not_reported():
+    channels = [{
+        "id": "c", "name": "C", "items": [
+            {"title": "Movie A", "file": "/a.mkv", "runtime": 6000},
+        ],
+    }]
+    data = schedule.build_schedule(channels, ANCHOR, ANCHOR + 6000 + 1)
+    movie = data["channels"][0]["programmes"][0]
+    assert "playcount" not in movie, "absence must not be mistaken for playcount=0 (unwatched)"
+
+
 def test_build_schedule_empty_channel():
     data = schedule.build_schedule(
         [{"id": "e", "name": "Empty", "items": []}], ANCHOR, ANCHOR + 3600

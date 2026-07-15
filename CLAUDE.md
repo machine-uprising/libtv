@@ -16,7 +16,10 @@ epoch times, persisted as `schedule.json`) → `channels.m3u` + `guide.xmltv`
 in the profile dir → IPTV Simple Client. Each M3U entry is a
 `plugin://plugin.video.libtv/?action=play&channel=<id>` URL; on playback the
 resolver looks up what the schedule says is on air *now* and resolves to that
-file with a `StartOffset`, so zapping joins programmes in progress.
+file, handing the join-in-progress offset to the background service (via a
+`ListItem` property, primary, and `pending_seek.json`, fallback — see
+"Live-verified findings" below) so zapping joins programmes already in
+progress.
 
 **`docs/architecture.md` is the canonical design document** — component map,
 schedule model, file formats, the tune/seek sequence, settings, invariants.
@@ -41,10 +44,16 @@ work through its checklist — it maps which document owns what.
     config (`channels.json`) and JSON-RPC filter building
   - `library.py` — JSON-RPC library queries (filtered per channel definition)
   - `generator.py` — orchestration: build schedule, write
-    M3U/XMLTV/schedule.json, PVR refresh (`refresh_pvr`)
-  - `plugin.py` — menu + stream resolver (`play` = the linear-TV core)
-  - `manage.py` — dialog-driven channel management UI
-  - `daemon.py` — background regeneration loop (`xbmc.Monitor`-based)
+    M3U/XMLTV/schedule.json, PVR refresh (`refresh_pvr`), pending-seek and
+    observed-runtime cache persistence
+  - `plugin.py` — menu + stream resolver (`play` = the linear-TV core),
+    including a schedule-miss loop guard (a `Window(10000)` property rate-
+    limiting forced regenerations)
+  - `manage.py` — dialog-driven channel management UI + genre- and
+    studio-based autotune
+  - `daemon.py` — background regeneration loop (`xbmc.Monitor`-based),
+    self-healing PVR-refresh retry, join-in-progress seek + observed-runtime
+    recording (`JoinInProgressPlayer`)
 - `resources/settings.xml` — new-format (`version="1"`) settings; labels are
   msgid numbers resolved via `resources/language/resource.language.en_gb/strings.po`
 - `tests/conftest.py` — hand-rolled fake `xbmc*` modules that make the add-on
@@ -144,6 +153,12 @@ encouraged for diagnosis.
   `streamdetails` from `library.py`'s property lists silently reverts every
   episode to the 90-minute default slot and breaks the join-in-progress
   seek. `scripts/sanity_check.py` mirrors the property lists; keep in sync.
+  As a second line of defense, `library._resolve_runtime` also falls back to
+  an observed-playback-duration cache (`generator.record_observed_runtime`,
+  written from `daemon.JoinInProgressPlayer.onAVStarted`) before giving up
+  and using the 90-minute default — this does not remove the need to keep
+  `streamdetails` requested, since the cache only has data for files that
+  have actually played at least once.
 - `default.py` and `service.py` must stay ≤15 counted lines
   (kodi-addon-checker "complex entry point" rule) — logic goes in
   `resources/lib/libtv/`.
@@ -206,20 +221,34 @@ see `docs/live-testing.md` for the checklist.
 - The resolver script CANNOT perform the seek itself: polling after
   `setResolvedUrl` works on first tune but fails on channel changes (the
   resolver script gets terminated when the previous channel's stream stops).
-- Hence the current design: the resolver writes `pending_seek.json` (before
-  resolving, so it survives script death) and the long-lived service seeks
-  from `daemon.JoinInProgressPlayer.onAVStarted`, clamping to the real file
-  duration. On a file mismatch the pending seek is left in place (rapid-zap
-  races); stale entries are dropped after `PENDING_SEEK_MAX_AGE`. Any change
-  to this flow must be re-verified live across *channel changes*, not just
-  first tune.
+- Hence the current design: the resolver sets a `"libtv_seek_offset"`
+  property directly on the `ListItem` it resolves (primary — read back via
+  `Player().getPlayingItem().getProperty(...)`, which Kodi's Player core
+  retains independent of the resolver script) and *also* writes
+  `pending_seek.json` (fallback — before resolving, so it survives script
+  death). The long-lived service seeks from
+  `daemon.JoinInProgressPlayer.onAVStarted`, preferring the property and
+  falling back to the file, clamping to the real file duration either way.
+  On a file mismatch via the file-fallback path, the pending seek is left in
+  place (rapid-zap races); stale entries are dropped after
+  `PENDING_SEEK_MAX_AGE`.
+- **The `"libtv_seek_offset"` ListItem-property path is NOT YET live-verified**
+  as the primary mechanism — it's a custom property, not `StartOffset`, so
+  the ignored-`StartOffset` finding doesn't tell us whether it survives to
+  PVR playback the same way. `pending_seek.json` stays as a safety net until
+  this is confirmed; see `docs/live-testing.md` §5. Any change to this flow
+  must be re-verified live across *channel changes*, not just first tune.
 
 ## Known gaps (as of 2026-07)
 
 - No icon/fanart assets yet (checker suggests adding them).
-- When the post-rebuild PVR refresh is skipped because something is playing,
-  the guide stays stale until a later regen cycle finds Kodi idle (no
-  deferred retry).
-- The channel management UI (custom channels, filters, reorder) and the
-  PVR-toggle refresh are unit-tested but not yet live-verified in a real
-  Kodi — see the new items in `docs/live-testing.md`.
+- The channel management UI (custom channels, filters, reorder), genre- and
+  studio-based autotune (`manage.autotune_genres`, `manage.autotune_studios`),
+  the PVR-toggle refresh (including its self-healing retry,
+  `daemon.PVR_RETRY_SECONDS`), the `"libtv_seek_offset"` ListItem-property
+  seek handoff, and the resolver's schedule-miss loop guard are all
+  unit-tested but not yet live-verified in a real Kodi — see the checklist in
+  `docs/live-testing.md`.
+- XMLTV `star-rating`/`new`/`xmltv_ns` fields depend on the library actually
+  reporting `rating`/`playcount` for an item — not yet spot-checked against a
+  real scraper's field coverage.

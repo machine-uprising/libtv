@@ -149,6 +149,46 @@ def test_describe_shows_non_default_order():
         "the default order is left off the summary"
 
 
+def test_auto_id_is_deterministic_and_slugified():
+    assert channels.auto_id("movies", "Sci-Fi & Fantasy") == "libtv.auto.movies.sci-fi-fantasy"
+    assert channels.auto_id("movies", "Action") == channels.auto_id("movies", "Action")
+    assert channels.auto_id("movies", "Action") != channels.auto_id("episodes", "Action")
+
+
+def test_is_auto_matches_prefix_and_optional_type():
+    auto = _custom(id=channels.auto_id("movies", "Action"))
+    custom = _custom(id="libtv.custom.1")
+    assert channels.is_auto(auto) is True
+    assert channels.is_auto(auto, "movies") is True
+    assert channels.is_auto(auto, "episodes") is False
+    assert channels.is_auto(custom) is False
+
+
+def test_auto_studio_id_is_deterministic_and_namespaced_separately():
+    assert channels.auto_studio_id("movies", "A24") == "libtv.auto.studio.movies.a24"
+    assert channels.auto_studio_id("movies", "A24") == channels.auto_studio_id("movies", "A24")
+    assert channels.auto_studio_id("movies", "A24") != channels.auto_id("movies", "A24")
+
+
+def test_is_studio_auto_matches_prefix_and_optional_type():
+    auto = _custom(id=channels.auto_studio_id("movies", "A24"))
+    custom = _custom(id="libtv.custom.1")
+    assert channels.is_studio_auto(auto) is True
+    assert channels.is_studio_auto(auto, "movies") is True
+    assert channels.is_studio_auto(auto, "episodes") is False
+    assert channels.is_studio_auto(custom) is False
+
+
+def test_is_auto_and_is_studio_auto_never_both_match():
+    genre_auto = _custom(id=channels.auto_id("movies", "Action"))
+    studio_auto = _custom(id=channels.auto_studio_id("movies", "Action"))
+    assert channels.is_auto(genre_auto) is True
+    assert channels.is_studio_auto(genre_auto) is False
+    assert channels.is_auto(studio_auto) is False, \
+        "a studio-autotune id must not be mistaken for a genre-autotune one"
+    assert channels.is_studio_auto(studio_auto) is True
+
+
 def test_build_sort_random_is_none():
     assert channels.build_sort(_custom(order="random")) is None
 

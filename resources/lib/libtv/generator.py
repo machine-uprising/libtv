@@ -16,6 +16,7 @@ XMLTV_NAME = "guide.xmltv"
 SCHEDULE_NAME = "schedule.json"
 CHANNELS_NAME = "channels.json"
 PENDING_SEEK_NAME = "pending_seek.json"
+RUNTIME_CACHE_NAME = "runtime_cache.json"
 
 # A pending seek older than this is abandoned (playback never started).
 PENDING_SEEK_MAX_AGE = 120
@@ -75,7 +76,8 @@ def regenerate():
 
     now = time.time()
     anchor = schedule.day_anchor(now)
-    lineup = library.fetch_channels(load_channel_defs(), max_items, anchor)
+    runtime_cache = load_runtime_cache()
+    lineup = library.fetch_channels(load_channel_defs(), max_items, anchor, runtime_cache)
 
     if shuffle:
         for ch in lineup:
@@ -177,3 +179,51 @@ def clear_pending_seek():
         os.remove(_pending_seek_path())
     except OSError:
         pass
+
+
+def _runtime_cache_path():
+    return os.path.join(profile_dir(), RUNTIME_CACHE_NAME)
+
+
+def _addon_version():
+    return xbmcaddon.Addon().getAddonInfo("version")
+
+
+def load_runtime_cache():
+    """Map of file path -> observed playback duration in seconds.
+
+    Populated by daemon.JoinInProgressPlayer.onAVStarted from Kodi's own
+    Player.getTotalTime() once a file is actually playing. library.py
+    consults this as a fallback when the library's own runtime metadata is
+    missing or zero (e.g. an episode scraper that never set one), which is
+    strictly more reliable than the library's stated value since it reflects
+    the real file — it's not a substitute for requesting streamdetails,
+    which is still needed for Kodi to fill in runtime in the first place.
+
+    The file is stamped with the add-on version that wrote it; a version
+    mismatch (add-on upgraded since) discards the cache instead of trusting
+    a possibly-incompatible on-disk shape — cheap insurance against needing
+    migration code for a cache format change across releases.
+    """
+    path = _runtime_cache_path()
+    if not os.path.exists(path):
+        return {}
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(data, dict) or data.get("version") != _addon_version():
+        return {}
+    entries = data.get("entries")
+    return entries if isinstance(entries, dict) else {}
+
+
+def record_observed_runtime(file_path, seconds):
+    """Persist an observed duration for file_path, merging into the cache."""
+    if not file_path or not seconds or seconds <= 0:
+        return
+    cache = load_runtime_cache()
+    cache[file_path] = int(seconds)
+    with open(_runtime_cache_path(), "w", encoding="utf-8") as f:
+        json.dump({"version": _addon_version(), "entries": cache}, f)

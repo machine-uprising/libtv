@@ -52,3 +52,11 @@ msgstr ""
 msgctxt "#32110"
 msgid "Manage channels"
 msgstr ""
+
+msgctxt "#32111"
+msgid "Auto-generate channels by genre"
+msgstr ""
+
+msgctxt "#32112"
+msgid "Auto-generate channels by studio"
+msgstr ""

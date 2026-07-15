@@ -40,6 +40,22 @@ def test_fetch_channels_runtime_falls_back_to_streamdetails(monkeypatch):
     assert all("streamdetails" not in it for it in items)
 
 
+def test_fetch_channels_runtime_falls_back_to_observed_cache(monkeypatch):
+    """When Kodi has no runtime at all (not even in streamdetails), an
+    observed-playback duration from generator.record_observed_runtime must
+    be used ahead of schedule.py's generic 90-minute default."""
+    from libtv import library
+
+    monkeypatch.setitem(conftest.JSONRPC_RESPONSES, "VideoLibrary.GetEpisodes", EPISODES)
+    defs = [{"id": "libtv.tv", "name": "TV Shows", "type": "episodes",
+             "genres": [], "studios": [], "year_from": None, "year_to": None,
+             "order": "az"}]
+
+    items = library.fetch_channels(defs, 10, 0, runtime_cache={"/c.mkv": 2400})[0]["items"]
+
+    assert [it["runtime"] for it in items] == [1800, 2632, 2400]
+
+
 def test_fetch_channels_requests_streamdetails(monkeypatch):
     from libtv import library
 

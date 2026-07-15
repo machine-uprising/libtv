@@ -20,6 +20,13 @@ SCHEDULE = {
                     "file": "/media/a.mkv",
                     "plot": "Plot A",
                     "genre": ["Action", "Thriller"],
+                    "year": 1985,
+                    "mpaa": "PG-13",
+                    "director": ["Dir A"],
+                    "cast": [{"name": "Actor A", "role": "Hero"}, "Actor B"],
+                    "icon": "http://logo/a.jpg",
+                    "rating": 8.7,
+                    "playcount": 0,
                 },
             ],
         },
@@ -39,6 +46,7 @@ SCHEDULE = {
                     "showtitle": "Some Show",
                     "season": 1,
                     "episode": 1,
+                    "playcount": 1,
                 },
             ],
         },
@@ -68,8 +76,29 @@ def test_render_xmltv_structure():
     assert movie.get("channel") == "libtv.movies"
     assert movie.find("title").text == "Movie A"
     assert [c.text for c in movie.findall("category")] == ["Action", "Thriller"]
+    assert movie.find("date").text == "1985"
+    assert movie.find("rating").get("system") == "MPAA"
+    assert movie.find("rating").text == "PG-13"
+    assert movie.find("icon").get("src") == "http://logo/a.jpg"
+    assert movie.find("new") is not None, "playcount=0 must produce an empty <new/> tag"
+    assert movie.find("star-rating/value").text == "8.7/10"
+    credits = movie.find("credits")
+    assert credits.find("director").text == "Dir A"
+    actors = credits.findall("actor")
+    assert actors[0].text == "Actor A" and actors[0].get("role") == "Hero"
+    assert actors[1].text == "Actor B" and actors[1].get("role") is None
+    # DTD element order: title, sub-title, desc, credits, date, category,
+    # icon, episode-num, new, rating, star-rating...
+    assert [child.tag for child in movie] == [
+        "title", "desc", "credits", "date", "category", "category", "icon",
+        "new", "rating", "star-rating",
+    ]
 
     # Episodes are titled by show, with the episode title as sub-title.
     assert episode.find("title").text == "Some Show"
     assert episode.find("sub-title").text == "Pilot"
-    assert episode.find("episode-num").text == "S01E01"
+    nums = episode.findall("episode-num")
+    assert [n.get("system") for n in nums] == ["xmltv_ns", "onscreen"]
+    assert nums[0].text == "0.0."
+    assert nums[1].text == "S01E01"
+    assert episode.find("new") is None, "playcount=1 (watched) must not get a <new/> tag"

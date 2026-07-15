@@ -112,6 +112,45 @@ def test_refresh_pvr_skips_when_client_missing_or_setting_off(monkeypatch):
     assert _toggle_calls() == []
 
 
+def test_runtime_cache_round_trips(monkeypatch):
+    from libtv import generator
+
+    assert generator.load_runtime_cache() == {}
+
+    generator.record_observed_runtime("/media/a.mkv", 5432)
+    generator.record_observed_runtime("/media/b.mkv", 1800)
+
+    assert generator.load_runtime_cache() == {"/media/a.mkv": 5432, "/media/b.mkv": 1800}
+
+
+def test_runtime_cache_self_invalidates_on_version_mismatch(monkeypatch):
+    from libtv import generator
+
+    generator.record_observed_runtime("/media/a.mkv", 5432)
+    assert generator.load_runtime_cache() == {"/media/a.mkv": 5432}
+
+    path = generator._runtime_cache_path()
+    with open(path, encoding="utf-8") as f:
+        data = json.load(f)
+    assert data["version"], "cache must be stamped with the add-on version that wrote it"
+    data["version"] = "some-other-version"
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f)
+
+    assert generator.load_runtime_cache() == {}, \
+        "an add-on upgrade must discard a cache written by a different version"
+
+
+def test_runtime_cache_ignores_zero_or_missing_duration(monkeypatch):
+    from libtv import generator
+
+    generator.record_observed_runtime("/media/a.mkv", 0)
+    generator.record_observed_runtime("", 1800)
+    generator.record_observed_runtime(None, 1800)
+
+    assert generator.load_runtime_cache() == {}
+
+
 def _run_plugin(monkeypatch, query):
     monkeypatch.setattr(
         sys, "argv", ["plugin://plugin.video.libtv/", "7", query]
@@ -143,7 +182,10 @@ def test_resolver_plays_current_programme_and_hands_off_seek(monkeypatch):
     assert succeeded is True
     assert listitem.path == "/media/a.mkv"
     # The seek itself happens in the service (daemon.JoinInProgressPlayer);
-    # the resolver just records what to seek to.
+    # the resolver just records what to seek to — primarily as a property on
+    # the resolved ListItem itself, with the pending-seek file kept as a
+    # fallback (see daemon.JoinInProgressPlayer._seek_offset).
+    assert listitem.getProperty("libtv_seek_offset") == str(offset)
     pending = generator.read_pending_seek()
     assert pending["file"] == "/media/a.mkv"
     assert pending["offset"] == offset
@@ -172,6 +214,54 @@ def test_resolver_fails_cleanly_for_unknown_channel(monkeypatch):
     assert len(resolved) == 1
     assert resolved[0][2] is False
     assert generator.read_pending_seek() is None
+
+
+def test_resolver_loop_guard_skips_repeated_regen_on_persistent_miss(monkeypatch):
+    from libtv import generator, plugin
+
+    _with_library(monkeypatch)
+    calls = []
+    real_regenerate = generator.regenerate
+
+    def counting_regenerate():
+        calls.append(1)
+        return real_regenerate()
+
+    monkeypatch.setattr(generator, "regenerate", counting_regenerate)
+
+    # "libtv.nope" is never on any schedule, so every resolve is a miss —
+    # simulates Kodi re-invoking the resolver rapidly for a broken channel.
+    plugin.play(1, "libtv.nope")
+    plugin.play(2, "libtv.nope")
+
+    assert len(calls) == 1, "a resolve within the guard window must not force another regen"
+    resolved = [c for c in conftest.CALLS if c[0] == "xbmcplugin.setResolvedUrl"]
+    assert [r[2] for r in resolved] == [False, False]
+
+
+def test_resolver_loop_guard_allows_regen_again_after_window_passes(monkeypatch):
+    from libtv import generator, plugin
+
+    _with_library(monkeypatch)
+    calls = []
+    real_regenerate = generator.regenerate
+
+    def counting_regenerate():
+        calls.append(1)
+        return real_regenerate()
+
+    monkeypatch.setattr(generator, "regenerate", counting_regenerate)
+
+    base = time.time()
+    monkeypatch.setattr(time, "time", lambda: base)
+    plugin.play(1, "libtv.nope")
+
+    monkeypatch.setattr(
+        time, "time", lambda: base + plugin._SCHEDULE_MISS_REGEN_GUARD_SECONDS + 1
+    )
+    plugin.play(2, "libtv.nope")
+
+    assert len(calls) == 2, "once the guard window has passed a genuine miss must regen again"
 
 
 def test_build_action_regenerates_and_refreshes_pvr(monkeypatch):

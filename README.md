@@ -37,18 +37,33 @@ from the same schedule, so the guide and playback always agree.
   you build your own — movie, TV-show, or mixed (movies and TV shows
   together) channels filtered by genre, studio, and production years, with
   full control over channel names and lineup order.
+- **Auto-generate channels by genre or studio**: instead of adding channels
+  one at a time, pick a content type and multiselect genres (or studios)
+  from your library — LibTV creates one channel per selection. Re-run either
+  one any time to add/remove its channels; manually created channels and the
+  other facet's autotune channels are never touched.
 - **Content order** per channel: Random (default — a day-stable random
   sample of the whole filtered library, so a channel with more content than
   the item cap doesn't just end up replaying the same couple of
   alphabetically-first shows/movies forever), A–Z, or Recently added.
+- **Rich guide entries**: release year, MPAA rating, star rating,
+  director/cast credits, poster art, and an "unwatched" flag are pulled from
+  your library metadata into the XMLTV guide when available, alongside the
+  plot, genre, and episode numbering (both `SxxEyy` and the zero-based
+  `xmltv_ns` form, for skins that read one or the other).
 - After every rebuild LibTV automatically reloads IPTV Simple (unless
-  something is playing), so lineup and guide changes show up without
-  restarting Kodi.
+  something is playing); if a refresh is skipped because something was
+  playing, it retries on its own shortly after playback stops, instead of
+  waiting for the next scheduled rebuild.
+- Episode/movie durations that come back missing from your library's
+  metadata (a common scraper gap) self-correct after the item is played
+  once — LibTV remembers the real duration and uses it for future guide
+  slots.
 - `service.py` runs in the background: regenerates the schedule and files at
   login and on a configurable interval, and performs the join-in-progress
   seek when a channel starts playing.
-- `default.py` provides the add-on menu (manage channels, rebuild, settings)
-  and the stream resolver.
+- `default.py` provides the add-on menu (manage channels, auto-generate,
+  rebuild, settings) and the stream resolver.
 - `resources/lib/libtv/` holds the actual logic; the schedule building,
   channel configuration, and file rendering are pure Python and fully
   unit-tested.
@@ -125,10 +140,18 @@ schedule generation, M3U/XMLTV output, the `plugin://` stream resolver, and
 the background refresh service are implemented and unit-tested, and the
 add-on passes `kodi-addon-checker` cleanly. Join-in-progress works by
 seeking right after playback starts (Kodi ignores `StartOffset` on resolved
-PVR streams). Episode durations come from the library's stream details
-(v0.3.1) — without them, episode scrapers that omit runtimes caused uniform
-90-minute guide slots. Custom channels (genre/studio/year filters, rename, reorder)
-and the automatic post-rebuild guide refresh are implemented and unit-tested
-but still awaiting live verification in a real Kodi (see
-`docs/live-testing.md`). See `CLAUDE.md` for development constraints and
-known gaps.
+PVR streams); as of v0.5.0 the primary handoff for that seek is a property
+set on the resolved `ListItem` rather than a file, though this specific
+mechanism is **not yet live-verified** (a file-based fallback remains in
+place — see `docs/live-testing.md`). Episode durations come from the
+library's stream details (v0.3.1), with a v0.5.0 addition: durations still
+missing after that self-correct from observed playback the first time an
+item is actually played, and the cache backing it self-invalidates on
+upgrade (v0.6.0). Custom channels (genre/studio/year filters, rename,
+reorder), genre- and studio-based channel autotune, richer XMLTV guide
+fields (year/rating/star-rating/credits/artwork/unwatched flag/dual
+episode-num systems), the automatic post-rebuild guide refresh (including
+its self-healing retry), and a resolver loop guard against rapid repeated
+schedule misses are implemented and unit-tested but still awaiting live
+verification in a real Kodi (see `docs/live-testing.md`). See `CLAUDE.md`
+for development constraints and known gaps.

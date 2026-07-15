@@ -12,10 +12,13 @@ from libtv import channels, schedule
 # streamdetails is also requested. Episode scrapers often provide no runtime
 # at all, so without it GetEpisodes returns runtime=0 for whole shows and
 # every episode gets scheduled at the 90-minute default (live-verified).
-MOVIE_PROPS = ["title", "file", "runtime", "plot", "genre", "streamdetails"]
+MOVIE_PROPS = [
+    "title", "file", "runtime", "plot", "genre", "year", "mpaa", "director", "cast",
+    "thumbnail", "streamdetails", "rating", "playcount",
+]
 EPISODE_PROPS = [
     "title", "file", "runtime", "plot", "showtitle", "season", "episode", "genre",
-    "streamdetails",
+    "firstaired", "director", "cast", "thumbnail", "streamdetails", "rating", "playcount",
 ]
 
 # media kind -> (method, result key, properties)
@@ -41,21 +44,28 @@ def json_rpc(method, params=None):
     return response.get("result", {})
 
 
-def _resolve_runtime(item):
+def _resolve_runtime(item, runtime_cache=None):
     """Fill a missing/zero runtime from stream details, then drop them.
 
     Requesting streamdetails normally makes Kodi return the extracted file
     duration as `runtime` already; this explicit fallback covers versions
     that don't, and keeps the bulky streamdetails blob out of the schedule.
+    If still missing, fall back to a duration actually observed during
+    playback (generator.record_observed_runtime) — more reliable than
+    scraped metadata for the exact file being scheduled.
     """
     details = item.pop("streamdetails", None) or {}
     if not item.get("runtime"):
         video = details.get("video") or [{}]
         item["runtime"] = video[0].get("duration") or 0
+    if not item.get("runtime") and runtime_cache:
+        observed = runtime_cache.get(item.get("file"))
+        if observed:
+            item["runtime"] = observed
     return item
 
 
-def fetch_channels(definitions, max_items, anchor_epoch):
+def fetch_channels(definitions, max_items, anchor_epoch, runtime_cache=None):
     """Query the library per channel definition and return raw channel
     definitions (unscheduled). Filters run server-side in Kodi's database.
 
@@ -84,7 +94,7 @@ def fetch_channels(definitions, max_items, anchor_epoch):
                 params["sort"] = sort
                 params["limits"] = {"start": 0, "end": max_items}
             fetched = json_rpc(method, params).get(key, [])
-            items.extend(_resolve_runtime(item) for item in fetched)
+            items.extend(_resolve_runtime(item, runtime_cache) for item in fetched)
         if sort:
             items = items[:max_items]
         else:

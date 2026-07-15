@@ -14,7 +14,14 @@ always the same handful of alphabetically-first shows once the library
 exceeds `max_items`. The list order in channels.json is the channel (and
 therefore guide) order. Channel ids are assigned once and never change — the
 deterministic shuffle seed and the PVR channel identity both key off them, so
-renames and reorders must not touch ids.
+renames and reorders must not touch ids. Manually created channels get a
+counter-assigned "libtv.custom.<n>" id (see `next_id`); autotune-generated
+channels get a deterministic id instead so re-running autotune updates the
+same channel rather than duplicating it — genre-facet autotune uses
+"libtv.auto.<type>.<slug>" (see `auto_id`) and studio-facet autotune uses
+"libtv.auto.studio.<type>.<slug>" (see `auto_studio_id`), kept in a separate
+sub-namespace so the two facets' channels can never collide or shadow each
+other.
 """
 from __future__ import annotations
 
@@ -32,6 +39,13 @@ TYPES = ("movies", "episodes", "mixed")
 ORDERS = ("random", "az", "newest")
 
 _CUSTOM_ID = re.compile(r"libtv\.custom\.(\d+)$")
+_SLUG_RE = re.compile(r"[^a-z0-9]+")
+
+# Auto-generated (autotune) channel ids are deterministic — libtv.auto.<type>.<slug>
+# — rather than counter-assigned, so re-running autotune for the same
+# type+label always maps to the same channel, keeping the "ids are
+# permanent" invariant without needing to remember what was picked before.
+AUTO_ID_PREFIX = "libtv.auto."
 
 
 def default_lineup():
@@ -100,6 +114,45 @@ def next_id(definitions):
         if match:
             highest = max(highest, int(match.group(1)))
     return f"libtv.custom.{highest + 1}"
+
+
+def auto_id(channel_type, label):
+    """Deterministic id for a genre-autotune-generated channel.
+
+    Same channel_type+label always yields the same id, so re-running
+    autotune updates the existing channel in place instead of creating a
+    duplicate with a fresh counter-assigned id.
+    """
+    slug = _SLUG_RE.sub("-", label.lower()).strip("-")
+    return f"{AUTO_ID_PREFIX}{channel_type}.{slug}"
+
+
+def is_auto(defn, channel_type=None):
+    """True for a genre-autotune id. Deliberately does NOT match studio-autotune
+    ids (auto_studio_id) — they live under a distinct "studio." sub-namespace
+    precisely so the two facets' rebuilds never collide or shadow each other.
+    """
+    prefix = f"{AUTO_ID_PREFIX}{channel_type}." if channel_type else AUTO_ID_PREFIX
+    return defn.get("id", "").startswith(prefix) and not is_studio_auto(defn)
+
+
+def auto_studio_id(channel_type, label):
+    """Deterministic id for a studio-autotune-generated channel.
+
+    Namespaced under "libtv.auto.studio." (rather than reusing auto_id's
+    "libtv.auto.<type>." shape) so studio-facet and genre-facet autotune
+    channels can never collide on id even if a studio and a genre happen to
+    share a label.
+    """
+    slug = _SLUG_RE.sub("-", label.lower()).strip("-")
+    return f"{AUTO_ID_PREFIX}studio.{channel_type}.{slug}"
+
+
+def is_studio_auto(defn, channel_type=None):
+    prefix = (
+        f"{AUTO_ID_PREFIX}studio.{channel_type}." if channel_type else f"{AUTO_ID_PREFIX}studio."
+    )
+    return defn.get("id", "").startswith(prefix)
 
 
 def find(definitions, channel_id):

@@ -50,6 +50,17 @@ def _execute_jsonrpc(request: str) -> str:
 # Tests mutate this to simulate the player; seekTime lands in CALLS.
 PLAYER = {"playing": False, "file": "", "time": 0.0, "total": 0.0}
 
+# The ListItem last passed to xbmcplugin.setResolvedUrl(succeeded=True) —
+# mirrors Kodi's Player core retaining the resolved item's properties, so
+# Player().getPlayingItem() can read back what the resolver set even though
+# the resolver script itself has already exited.
+_CURRENT_LISTITEM = None
+
+# Backing store for the fake xbmcgui.Window(10000) — mirrors Kodi's Home
+# window properties being visible across every short-lived process talking
+# to the same Kodi instance (plugin.py's resolve-loop guard relies on this).
+_WINDOW_PROPERTIES: dict[str, str] = {}
+
 
 class _Monitor:
     """Non-aborting monitor: waitForAbort returns immediately without
@@ -73,6 +84,10 @@ class _Player:
     def getPlayingFile(self) -> str:
         self._require_playing()
         return PLAYER["file"]
+
+    def getPlayingItem(self):
+        self._require_playing()
+        return _CURRENT_LISTITEM
 
     def getTime(self) -> float:
         self._require_playing()
@@ -182,6 +197,9 @@ class _ListItem:
     def setProperty(self, key: str, value: str) -> None:
         self.properties[key] = value
 
+    def getProperty(self, key: str) -> str:
+        return self.properties.get(key, "")
+
     def setArt(self, art: dict) -> None:
         pass
 
@@ -189,10 +207,25 @@ class _ListItem:
         pass
 
 
+class _Window:
+    def __init__(self, window_id: int = 0) -> None:
+        self._id = window_id
+
+    def getProperty(self, key: str) -> str:
+        return _WINDOW_PROPERTIES.get(key, "")
+
+    def setProperty(self, key: str, value: str) -> None:
+        _WINDOW_PROPERTIES[key] = value
+
+    def clearProperty(self, key: str) -> None:
+        _WINDOW_PROPERTIES.pop(key, None)
+
+
 def _make_xbmcgui() -> types.ModuleType:
     mod = types.ModuleType("xbmcgui")
     mod.Dialog = _Dialog
     mod.ListItem = _ListItem
+    mod.Window = _Window
     mod.NOTIFICATION_INFO = "info"
     mod.INPUT_ALPHANUM = 0
     mod.INPUT_NUMERIC = 1
@@ -203,6 +236,9 @@ def _make_xbmcplugin() -> types.ModuleType:
     mod = types.ModuleType("xbmcplugin")
 
     def set_resolved_url(handle, succeeded, listitem) -> None:
+        global _CURRENT_LISTITEM
+        if succeeded:
+            _CURRENT_LISTITEM = listitem
         CALLS.append(("xbmcplugin.setResolvedUrl", handle, succeeded, listitem))
 
     mod.addDirectoryItem = lambda handle, url, listitem, isFolder=False: CALLS.append(
@@ -232,11 +268,15 @@ def _reset_kodi_fakes():
     from libtv import generator
 
     generator.clear_pending_seek()
-    try:
-        os.remove(generator.channels_path())
-    except OSError:
-        pass
+    for path in (generator.channels_path(), generator._runtime_cache_path()):
+        try:
+            os.remove(path)
+        except OSError:
+            pass
     PLAYER.update(playing=False, file="", time=0.0, total=0.0)
+    global _CURRENT_LISTITEM
+    _CURRENT_LISTITEM = None
+    _WINDOW_PROPERTIES.clear()
     CALLS.clear()
     for queue in DIALOG_RESPONSES.values():
         queue.clear()

@@ -240,3 +240,5 @@ resources/media/*.jpg
 # belt-and-braces guard against it ever being misconfigured as relative again —
 # this tree can contain OAuth credentials).
 /home/
+
+doc_review/pseudotv-live-review.md
