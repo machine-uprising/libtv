@@ -2,8 +2,10 @@
 
 The "Manage channels" directory lists the lineup; every item is a command:
 clicking it re-invokes the plugin, which walks the user through dialogs,
-saves channels.json, rebuilds everything (schedule, M3U, XMLTV, PVR
-refresh), and refreshes the container so the list reflects the change.
+saves channels.json, rebuilds what actually needs it (see `_apply`'s
+content_changed — edits that can't affect what a channel fetches skip the
+library refetch entirely), and refreshes the container so the list reflects
+the change.
 """
 from __future__ import annotations
 
@@ -35,10 +37,25 @@ def _done(handle):
     xbmcplugin.endOfDirectory(handle, succeeded=False, cacheToDisc=False)
 
 
-def _apply(definitions):
-    """Persist the lineup, rebuild all artifacts, and redraw the list."""
+def _apply(definitions, content_changed=True):
+    """Persist the lineup, rebuild what actually needs it, and redraw the
+    list.
+
+    content_changed=False is for edits that can't have changed what any
+    channel fetches — rename, reorder, delete — so the (expensive, one
+    JSON-RPC round trip per channel) library refetch is skipped entirely via
+    generator.relabel_schedule, which instead patches the existing
+    schedule's channel names/order/membership directly. content_changed=True
+    (the default: add a channel, edit filters & order, autotune) always
+    does the full fetch, since the fetch criteria themselves may have
+    changed. Each call site already knows which kind of edit just happened,
+    so no generic before/after diff of channels.json is needed to decide.
+    """
     generator.save_channel_defs(definitions)
-    plugin.build()
+    if content_changed:
+        plugin.build()
+    else:
+        plugin.build(regenerate_fn=lambda: generator.relabel_schedule(definitions))
     xbmc.executebuiltin("Container.Refresh")
 
 
@@ -91,6 +108,20 @@ _KINDS = ["Movies", "TV shows", "Mixed (Movies & TV shows)"]
 _KIND_TYPES = ["movies", "episodes", "mixed"]
 
 
+def _preview_match_count(defn):
+    """Non-blocking preview of how many library items the current filter
+    combination matches, shown right after editing filters and before the
+    channel is actually saved — catches "this filter matches nothing" (or
+    "matches way more than I meant") before the user commits to it.
+    """
+    count = library.count_matches(defn)
+    noun = "item" if count == 1 else "items"
+    verb = "matches" if count == 1 else "match"
+    xbmcgui.Dialog().notification(
+        "LibTV", f"{count} {noun} {verb} this channel", xbmcgui.NOTIFICATION_INFO, 3000
+    )
+
+
 def add_channel(handle):
     dialog = xbmcgui.Dialog()
     kind = dialog.select("Channel type", _KINDS)
@@ -111,6 +142,7 @@ def add_channel(handle):
         "order": "random",
     }
     _edit_filters(dialog, defn)
+    _preview_match_count(defn)
     definitions.append(defn)
     _apply(definitions)
     _done(handle)
@@ -128,6 +160,10 @@ def channel_options(handle, channel_id):
         defn["name"], ["Rename", "Edit filters & order", "Move up", "Move down", "Delete"]
     )
     changed = False
+    # Only "Edit filters & order" can change what the channel fetches; the
+    # rest (rename/reorder/delete) let _apply take the cheap relabel-only
+    # path instead of a full library refetch (generator.relabel_schedule).
+    content_changed = False
     if choice == 0:
         name = dialog.input("Channel name", defn["name"])
         if name and name != defn["name"]:
@@ -135,7 +171,9 @@ def channel_options(handle, channel_id):
             changed = True
     elif choice == 1:
         _edit_filters(dialog, defn)
+        _preview_match_count(defn)
         changed = True
+        content_changed = True
     elif choice == 2:
         changed = channels.move(definitions, channel_id, -1)
     elif choice == 3:
@@ -146,7 +184,7 @@ def channel_options(handle, channel_id):
             changed = True
 
     if changed:
-        _apply(definitions)
+        _apply(definitions, content_changed=content_changed)
     _done(handle)
 
 

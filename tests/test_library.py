@@ -98,6 +98,40 @@ def test_fetch_channels_mixed_type_combines_movies_and_episodes(monkeypatch):
     assert titles == ["Movie A", "Scraped", "Unscraped", "Bare"]
 
 
+def test_count_matches_movies_only(monkeypatch):
+    from libtv import library
+
+    monkeypatch.setitem(conftest.JSONRPC_RESPONSES, "VideoLibrary.GetMovies", MOVIES)
+    defn = {"id": "libtv.custom.1", "name": "Movies", "type": "movies",
+            "genres": [], "studios": [], "year_from": None, "year_to": None,
+            "order": "random"}
+
+    assert library.count_matches(defn) == 1
+
+
+def test_count_matches_sums_mixed_type(monkeypatch):
+    from libtv import library
+
+    monkeypatch.setitem(conftest.JSONRPC_RESPONSES, "VideoLibrary.GetMovies", MOVIES)
+    monkeypatch.setitem(conftest.JSONRPC_RESPONSES, "VideoLibrary.GetEpisodes", EPISODES)
+    defn = {"id": "libtv.custom.1", "name": "Mixed", "type": "mixed",
+            "genres": [], "studios": [], "year_from": None, "year_to": None,
+            "order": "random"}
+
+    assert library.count_matches(defn) == 1 + len(EPISODES["episodes"])
+
+
+def test_count_matches_zero_for_no_matches(monkeypatch):
+    from libtv import library
+
+    monkeypatch.setitem(conftest.JSONRPC_RESPONSES, "VideoLibrary.GetMovies", {"movies": []})
+    defn = {"id": "libtv.custom.1", "name": "Nothing", "type": "movies",
+            "genres": ["Nonexistent"], "studios": [], "year_from": None, "year_to": None,
+            "order": "random"}
+
+    assert library.count_matches(defn) == 0
+
+
 def test_fetch_channels_mixed_type_caps_combined_total(monkeypatch):
     from libtv import library
 

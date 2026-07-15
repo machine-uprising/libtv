@@ -186,9 +186,25 @@ rebuilds — see the packaging gotchas in `CLAUDE.md`.) Then in Kodi:
     (`channels.json` id unchanged).
   - **Move up/down** → channel order changes in the guide after refresh.
   - **Delete** (with confirmation) → channel gone from the guide.
+  - **Diff-driven invalidation (rename/move/delete take the fast path)** —
+    with debug logging on, do a Rename, a Move up/down, and a Delete on a
+    channel and confirm the log does **not** show a fresh
+    `VideoLibrary.GetMovies`/`GetEpisodes` call for any of them (only
+    `LibTV: relabeled schedule without a library refetch`), while an **Edit
+    filters & order** on the same channel *does* trigger a normal fetch.
+    Also confirm the guide and playback are still correct after each —
+    especially after a rename immediately followed by a channel change,
+    since this path skips the programme-timing recomputation entirely and
+    relies on the existing schedule still being valid.
   - Filter counts sanity: spot-check a genre/studio/year channel's programmes
     against the library (filters run in Kodi's DB via `List.Filter`; the
     unit tests only verify the filter JSON we send).
+  - **Channel preview count** — while adding or editing a channel's
+    filters/order, confirm a "N item(s) match this channel" notification
+    appears right after the order/genre/studio/year dialogs and before the
+    "Channels & guide updated" rebuild notification. Pick a filter
+    combination you know matches nothing (e.g. a genre with no year overlap)
+    and confirm it reports 0 rather than erroring or silently saving.
   - **Auto-generate channels by genre** (add-on menu's "+ Auto-generate
     channels by genre" item, or the settings button) → pick a content type,
     multiselect several genres, confirm → each selected genre gets its own

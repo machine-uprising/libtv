@@ -39,8 +39,15 @@ def main_menu(base_url, handle):
     xbmcplugin.endOfDirectory(handle)
 
 
-def build():
-    generator.regenerate()
+def build(regenerate_fn=None):
+    """Rebuild everything and refresh the PVR client.
+
+    regenerate_fn lets callers substitute a cheaper rebuild than a full
+    `generator.regenerate()` (e.g. `manage.py`'s diff-driven
+    `generator.relabel_schedule` for edits that don't change what any
+    channel fetches) while still sharing the refresh/notification logic.
+    """
+    (regenerate_fn or generator.regenerate)()
     refreshed = generator.refresh_pvr()
     message = (
         "Channels & guide updated"

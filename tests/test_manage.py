@@ -73,6 +73,9 @@ def test_add_channel_flow_saves_filters_and_rebuilds(monkeypatch):
     schedule = generator.load_schedule()
     assert "libtv.custom.1" in [ch["id"] for ch in schedule["channels"]]
     assert _refreshed()
+    # Preview count shown after editing filters, before the channel is saved.
+    notes = [c for c in conftest.CALLS if c[0] == "xbmcgui.notification"]
+    assert ("xbmcgui.notification", "LibTV", "1 item matches this channel") in notes
 
 
 def test_add_mixed_channel_pulls_movies_and_episodes(monkeypatch):
@@ -94,6 +97,9 @@ def test_add_mixed_channel_pulls_movies_and_episodes(monkeypatch):
     ch = next(c for c in schedule["channels"] if c["id"] == "libtv.custom.1")
     titles = {p["title"] for p in ch["programmes"]}
     assert "Movie A" in titles
+    # Mixed channels preview the combined movie+episode count.
+    notes = [c for c in conftest.CALLS if c[0] == "xbmcgui.notification"]
+    assert ("xbmcgui.notification", "LibTV", "2 items match this channel") in notes
     assert "Pilot" in titles
     assert _refreshed()
 
@@ -120,6 +126,96 @@ def test_rename_channel(monkeypatch):
     assert _refreshed()
 
 
+def test_rename_channel_skips_library_refetch(monkeypatch):
+    """Renaming can't change what a channel fetches, so _apply's
+    content_changed=False path (generator.relabel_schedule) must patch the
+    existing schedule in place instead of re-querying the library."""
+    _with_library(monkeypatch)
+    before = generator.regenerate()  # seed schedule.json so the fast path applies
+    before_tv = next(ch for ch in before["channels"] if ch["id"] == "libtv.tv")
+    before_programmes = before_tv["programmes"]
+
+    conftest.DIALOG_RESPONSES["select"].append(0)  # Rename
+    conftest.DIALOG_RESPONSES["input"].append("Retro TV")
+    _run_plugin(monkeypatch, "?action=channel_options&channel=libtv.tv")
+
+    fetch_calls = [
+        c for c in conftest.CALLS
+        if c[1] in ("VideoLibrary.GetMovies", "VideoLibrary.GetEpisodes")
+    ]
+    assert fetch_calls == [], "a rename must not re-fetch the library"
+    after = generator.load_schedule()
+    renamed = next(ch for ch in after["channels"] if ch["id"] == "libtv.tv")
+    assert renamed["name"] == "Retro TV"
+    assert renamed["programmes"] == before_programmes, "programme timing must be untouched"
+    assert _refreshed()
+
+
+def test_rename_channel_falls_back_to_regenerate_without_a_schedule(monkeypatch):
+    """No schedule.json yet (fresh install) -> relabel_schedule has nothing
+    to patch, so it must fall back to a full regenerate() rather than error
+    or silently produce no output."""
+    _with_library(monkeypatch)
+    assert generator.load_schedule() is None
+
+    conftest.DIALOG_RESPONSES["select"].append(0)  # Rename
+    conftest.DIALOG_RESPONSES["input"].append("Retro TV")
+    _run_plugin(monkeypatch, "?action=channel_options&channel=libtv.tv")
+
+    assert generator.load_schedule() is not None
+    fetch_calls = [c for c in conftest.CALLS if c[1] == "VideoLibrary.GetEpisodes"]
+    assert fetch_calls, "with no prior schedule, a rename must fall back to a full fetch"
+
+
+def test_move_channel_skips_library_refetch_and_reorders_schedule(monkeypatch):
+    _with_library(monkeypatch)
+    generator.regenerate()
+
+    conftest.DIALOG_RESPONSES["select"].append(2)  # Move up
+    _run_plugin(monkeypatch, "?action=channel_options&channel=libtv.tv")
+
+    fetch_calls = [
+        c for c in conftest.CALLS
+        if c[1] in ("VideoLibrary.GetMovies", "VideoLibrary.GetEpisodes")
+    ]
+    assert fetch_calls == [], "a reorder must not re-fetch the library"
+    after = generator.load_schedule()
+    assert [ch["id"] for ch in after["channels"]] == ["libtv.tv", "libtv.movies"]
+
+
+def test_delete_channel_skips_library_refetch_and_drops_from_schedule(monkeypatch):
+    _with_library(monkeypatch)
+    generator.regenerate()
+
+    conftest.DIALOG_RESPONSES["select"].append(4)  # Delete
+    conftest.DIALOG_RESPONSES["yesno"].append(True)
+    _run_plugin(monkeypatch, "?action=channel_options&channel=libtv.tv")
+
+    fetch_calls = [
+        c for c in conftest.CALLS
+        if c[1] in ("VideoLibrary.GetMovies", "VideoLibrary.GetEpisodes")
+    ]
+    assert fetch_calls == [], "a delete must not re-fetch the library"
+    after = generator.load_schedule()
+    assert [ch["id"] for ch in after["channels"]] == ["libtv.movies"]
+
+
+def test_edit_filters_still_does_a_full_refetch_even_with_a_prior_schedule(monkeypatch):
+    """Unlike rename/move/delete, editing filters & order can change what a
+    channel fetches, so it must always take the full-regenerate path even
+    when a schedule already exists to patch."""
+    _with_library(monkeypatch)
+    generator.regenerate()
+
+    conftest.DIALOG_RESPONSES["select"].extend([1, 0])  # Edit filters & order, order: Random
+    conftest.DIALOG_RESPONSES["multiselect"].append([0])  # genres: Comedy
+    conftest.DIALOG_RESPONSES["input"].extend(["", ""])  # year bounds: blank
+    _run_plugin(monkeypatch, "?action=channel_options&channel=libtv.tv")
+
+    fetch_calls = [c for c in conftest.CALLS if c[1] == "VideoLibrary.GetEpisodes"]
+    assert fetch_calls, "editing filters must still re-fetch the library"
+
+
 def test_edit_content_order(monkeypatch):
     _with_library(monkeypatch)
     conftest.DIALOG_RESPONSES["select"].extend([1, 1])  # Edit filters & order, then order: A-Z
@@ -132,7 +228,9 @@ def test_edit_content_order(monkeypatch):
     edited = [d for d in defs if d["id"] == "libtv.tv"][0]
     assert edited["order"] == "az"
     # The rebuild must have asked Kodi to sort+limit server-side for "az".
-    call = next(c for c in conftest.CALLS if c[1] == "VideoLibrary.GetEpisodes")
+    # (The preview count issues its own, sort-less GetEpisodes call first —
+    # filter for the one that actually carries a sort.)
+    call = next(c for c in conftest.CALLS if c[1] == "VideoLibrary.GetEpisodes" and "sort" in c[2])
     assert call[2]["sort"] == {"method": "title", "order": "ascending", "ignorearticle": True}
     assert call[2]["limits"] == {"start": 0, "end": 150}
     assert _refreshed()

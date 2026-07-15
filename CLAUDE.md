@@ -44,13 +44,17 @@ work through its checklist — it maps which document owns what.
     config (`channels.json`) and JSON-RPC filter building
   - `library.py` — JSON-RPC library queries (filtered per channel definition)
   - `generator.py` — orchestration: build schedule, write
-    M3U/XMLTV/schedule.json, PVR refresh (`refresh_pvr`), pending-seek and
+    M3U/XMLTV/schedule.json (`regenerate`, full library fetch) or patch just
+    the schedule's channel metadata in place without a fetch
+    (`relabel_schedule` — the management UI's diff-driven invalidation, see
+    `docs/architecture.md` §3), PVR refresh (`refresh_pvr`), pending-seek and
     observed-runtime cache persistence
   - `plugin.py` — menu + stream resolver (`play` = the linear-TV core),
     including a schedule-miss loop guard (a `Window(10000)` property rate-
     limiting forced regenerations)
-  - `manage.py` — dialog-driven channel management UI + genre- and
-    studio-based autotune
+  - `manage.py` — dialog-driven channel management UI (with a match-count
+    preview before saving a channel's filters) + genre- and studio-based
+    autotune
   - `daemon.py` — background regeneration loop (`xbmc.Monitor`-based),
     self-healing PVR-refresh retry, join-in-progress seek + observed-runtime
     recording (`JoinInProgressPlayer`)
@@ -242,13 +246,14 @@ see `docs/live-testing.md` for the checklist.
 ## Known gaps (as of 2026-07)
 
 - No icon/fanart assets yet (checker suggests adding them).
-- The channel management UI (custom channels, filters, reorder), genre- and
-  studio-based autotune (`manage.autotune_genres`, `manage.autotune_studios`),
-  the PVR-toggle refresh (including its self-healing retry,
-  `daemon.PVR_RETRY_SECONDS`), the `"libtv_seek_offset"` ListItem-property
-  seek handoff, and the resolver's schedule-miss loop guard are all
-  unit-tested but not yet live-verified in a real Kodi — see the checklist in
-  `docs/live-testing.md`.
+- The channel management UI (custom channels, filters, reorder, the
+  diff-driven invalidation that skips a library refetch for rename/move/
+  delete), genre- and studio-based autotune (`manage.autotune_genres`,
+  `manage.autotune_studios`), the PVR-toggle refresh (including its
+  self-healing retry, `daemon.PVR_RETRY_SECONDS`), the `"libtv_seek_offset"`
+  ListItem-property seek handoff, and the resolver's schedule-miss loop
+  guard are all unit-tested but not yet live-verified in a real Kodi — see
+  the checklist in `docs/live-testing.md`.
 - XMLTV `star-rating`/`new`/`xmltv_ns` fields depend on the library actually
   reporting `rating`/`playcount` for an item — not yet spot-checked against a
   real scraper's field coverage.

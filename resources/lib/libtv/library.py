@@ -109,6 +109,28 @@ def fetch_channels(definitions, max_items, anchor_epoch, runtime_cache=None):
     return out
 
 
+def count_matches(defn):
+    """Total items this (possibly not-yet-saved) channel definition would
+    currently pull, without fetching the items themselves.
+
+    A cheap preview for the management UI — confirms a filter combination
+    actually matches something in the library before the user commits to
+    saving the channel, at the cost of one extra JSON-RPC round trip per
+    media kind (properties=[] and a zero-width limits window keep the
+    response small; Kodi still reports the true match count in `limits.total`).
+    """
+    filt = channels.build_filter(defn)
+    total = 0
+    for kind in _MEDIA[defn["type"]]:
+        method, key, _ = _QUERIES[kind]
+        params = {"properties": [], "limits": {"start": 0, "end": 0}}
+        if filt:
+            params["filter"] = filt
+        result = json_rpc(method, params)
+        total += result.get("limits", {}).get("total", len(result.get(key, [])))
+    return total
+
+
 _KODI_LIBRARY_TYPES = {"movies": ("movie",), "episodes": ("tvshow",), "mixed": ("movie", "tvshow")}
 
 

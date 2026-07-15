@@ -45,7 +45,7 @@ inputs for Kodi's native PVR stack and resolves streams on demand:
 | `resources/lib/libtv/writers.py` | **Pure.** Renders M3U and XMLTV strings from a schedule dict. |
 | `resources/lib/libtv/channels.py` | **Pure.** Channel-lineup configuration: `channels.json` load/save, default lineup, id allocation, reorder, JSON-RPC filter building (`build_filter`), and per-channel selection-order building (`build_sort`). |
 | `resources/lib/libtv/library.py` | Kodi JSON-RPC library queries (`VideoLibrary.GetMovies` / `GetEpisodes`, filtered and sorted per channel definition) plus genre/studio pickers for the management UI. Resolves each item's runtime, falling back to stream-details duration then an observed-playback-duration cache (§4); for `order: random` also does the day-stable selection (§4). |
-| `resources/lib/libtv/generator.py` | Orchestration: fetch → schedule → write all artifacts. Owns the profile directory, the pending-seek handoff file, the version-stamped observed-runtime cache, and the PVR refresh (`refresh_pvr`). |
+| `resources/lib/libtv/generator.py` | Orchestration: fetch → schedule → write all artifacts (`regenerate`), or patch just the persisted schedule's channel metadata without a library refetch (`relabel_schedule`, §3). Owns the profile directory, the pending-seek handoff file, the version-stamped observed-runtime cache, and the PVR refresh (`refresh_pvr`). |
 | `resources/lib/libtv/plugin.py` | Plugin routing: menu, build action, and the stream resolver (`play`), including its schedule-miss loop guard (§6). |
 | `resources/lib/libtv/manage.py` | Dialog-driven channel management UI (add/rename/filter/order/reorder/delete) plus genre- and studio-based channel autotune (§3). |
 | `resources/lib/libtv/daemon.py` | Service loop (periodic regeneration, self-healing PVR-refresh retry) + `JoinInProgressPlayer` (the seek half of join-in-progress; also records observed durations). |
@@ -101,12 +101,45 @@ deleted every channel.
   Missing/invalid `order` values (older `channels.json` files predate this
   field) normalize to `random`.
 - The management UI (`manage.py`, reachable from the add-on menu and a
-  settings button) edits the file via dialogs; every mutation saves,
-  rebuilds all artifacts, and refreshes the PVR client immediately. Genre
-  and studio pickers are populated from the library (`library.fetch_genres`,
+  settings button) edits the file via dialogs; every mutation saves and
+  refreshes the PVR client immediately, but only rebuilds what actually
+  needs it (**diff-driven invalidation**, below). Genre and studio pickers
+  are populated from the library (`library.fetch_genres`,
   `library.fetch_studios` — JSON-RPC has no `GetStudios`, so studios are
   aggregated from movie/show items); for a `mixed` channel these union the
   movie and tvshow results.
+- **Diff-driven invalidation**: `manage._apply(definitions, content_changed)`
+  is the single choke point every mutation goes through.
+  `content_changed=True` (add a channel, edit filters & order, autotune —
+  anything that can change *what* a channel fetches) does the normal full
+  `generator.regenerate()`: one JSON-RPC round trip per channel per media
+  kind. `content_changed=False` (rename, move up/down, delete — nothing
+  that can affect fetch criteria) instead calls
+  `generator.relabel_schedule(definitions)`, which patches the *existing*
+  `schedule.json`'s channel `name`/`group`/membership/order in place —
+  re-rendering the M3U/XMLTV from the patched schedule but skipping the
+  library fetch and programme-timing recomputation entirely. Each call site
+  already knows which kind of edit just happened, so there's no need for a
+  generic before/after diff of `channels.json` — the classification is just
+  "did this dialog flow touch `genres`/`studios`/`year_from`/`year_to`/
+  `type`/`order`, or not". `relabel_schedule` falls back to a full
+  `regenerate()` if there's no schedule yet to patch (fresh install) or a
+  channel in `definitions` has no matching schedule entry (a
+  content_changed=False call for what turns out to be a channel `regenerate()`
+  has never fetched) — safety nets, not the common path. This is scoped
+  narrower than a general "staged edits" session (each dialog flow is still
+  one immediate, complete action): it only removes *redundant* library
+  fetches from single edits that can't need one, which matters more now
+  that autotune (§3) can produce dozens of channels from one settings
+  screen — a rename or reorder among them no longer re-fetches all of them.
+- **Channel preview**: right after editing filters/order (add or edit flow,
+  before the channel is actually saved), `manage._preview_match_count` shows
+  a non-blocking notification with how many library items the current
+  filter combination matches (`library.count_matches` — a `List.Filter`
+  query per media kind with `properties: []` and a zero-width `limits`
+  window, reading Kodi's own `limits.total` rather than fetching items).
+  Catches an over-narrow (or accidentally unfiltered) channel before it's
+  committed, without the cost of a full `fetch_channels`-style dry run.
 - **Autotune** — two independent facets, same shape, reachable from "Manage
   channels" and their own settings buttons:
   - **Genre** (`manage.autotune_genres`) auto-generates one channel per

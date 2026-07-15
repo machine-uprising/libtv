@@ -101,6 +101,54 @@ def regenerate():
     return data
 
 
+def relabel_schedule(definitions):
+    """Patch the persisted schedule's channel metadata (name, group,
+    membership, order) from the current channel lineup, without re-fetching
+    the library or recomputing programme timing.
+
+    For management-UI edits that don't change what any channel fetches —
+    rename, reorder, delete — the existing schedule's programmes are still
+    entirely correct; only the M3U/XMLTV's channel-level labels and ordering
+    need to change. This is `manage.py`'s diff-driven invalidation: the call
+    site already knows whether an edit touched a channel's filter/type/order
+    (see `manage._apply`'s `content_changed` flag), so unlike a generic
+    old-vs-new diff, no schedule inspection is needed to decide whether a
+    full `regenerate()` (JSON-RPC fetch across every channel) can be
+    skipped — only to perform the skip once the caller has already decided.
+
+    Falls back to a full `regenerate()` if there's no schedule to patch yet,
+    or if a channel in `definitions` has no matching schedule entry (a
+    caller passed a stale/incorrect content_changed=False for what turned
+    out to be a genuinely new channel).
+    """
+    data = load_schedule()
+    if data is None:
+        return regenerate()
+
+    by_id = {ch["id"]: ch for ch in data["channels"]}
+    patched = []
+    for defn in definitions:
+        ch = by_id.get(defn["id"])
+        if ch is None:
+            return regenerate()
+        ch["name"] = defn["name"]
+        ch["group"] = channels.group(defn)
+        patched.append(ch)
+    data["channels"] = patched
+
+    addon_id = xbmcaddon.Addon().getAddonInfo("id")
+    prof = profile_dir()
+    with open(os.path.join(prof, M3U_NAME), "w", encoding="utf-8") as f:
+        f.write(writers.render_m3u(data, addon_id))
+    with open(os.path.join(prof, XMLTV_NAME), "w", encoding="utf-8") as f:
+        f.write(writers.render_xmltv(data))
+    with open(schedule_path(), "w", encoding="utf-8") as f:
+        json.dump(data, f)
+
+    xbmc.log("LibTV: relabeled schedule without a library refetch", xbmc.LOGINFO)
+    return data
+
+
 def refresh_pvr():
     """Make IPTV Simple reload the regenerated M3U/EPG. Returns True if done.
 

@@ -268,7 +268,13 @@ def _reset_kodi_fakes():
     from libtv import generator
 
     generator.clear_pending_seek()
-    for path in (generator.channels_path(), generator._runtime_cache_path()):
+    for path in (
+        generator.channels_path(),
+        generator._runtime_cache_path(),
+        generator.schedule_path(),
+        os.path.join(generator.profile_dir(), generator.M3U_NAME),
+        os.path.join(generator.profile_dir(), generator.XMLTV_NAME),
+    ):
         try:
             os.remove(path)
         except OSError:

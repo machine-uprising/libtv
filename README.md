@@ -36,7 +36,12 @@ from the same schedule, so the guide and playback always agree.
   TV Shows), and **Manage channels** (in the add-on menu and settings) lets
   you build your own — movie, TV-show, or mixed (movies and TV shows
   together) channels filtered by genre, studio, and production years, with
-  full control over channel names and lineup order.
+  full control over channel names and lineup order. Editing a channel's
+  filters shows a "N items match this channel" preview before you save, so
+  an over-narrow (or accidentally empty) filter is obvious immediately.
+  Renaming, reordering, or deleting a channel updates the guide instantly
+  without re-scanning your whole library — only adding a channel or
+  changing its filters does a full rescan.
 - **Auto-generate channels by genre or studio**: instead of adding channels
   one at a time, pick a content type and multiselect genres (or studios)
   from your library — LibTV creates one channel per selection. Re-run either
@@ -148,7 +153,9 @@ library's stream details (v0.3.1), with a v0.5.0 addition: durations still
 missing after that self-correct from observed playback the first time an
 item is actually played, and the cache backing it self-invalidates on
 upgrade (v0.6.0). Custom channels (genre/studio/year filters, rename,
-reorder), genre- and studio-based channel autotune, richer XMLTV guide
+reorder, a match-count preview before saving (v0.6.1), and diff-driven
+invalidation so rename/reorder/delete skip the library rescan entirely
+(v0.6.2)), genre- and studio-based channel autotune, richer XMLTV guide
 fields (year/rating/star-rating/credits/artwork/unwatched flag/dual
 episode-num systems), the automatic post-rebuild guide refresh (including
 its self-healing retry), and a resolver loop guard against rapid repeated

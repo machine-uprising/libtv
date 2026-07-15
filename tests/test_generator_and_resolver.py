@@ -112,6 +112,32 @@ def test_refresh_pvr_skips_when_client_missing_or_setting_off(monkeypatch):
     assert _toggle_calls() == []
 
 
+def test_relabel_schedule_falls_back_to_regenerate_for_an_unknown_channel(monkeypatch):
+    """A caller claiming content_changed=False for what turns out to be a
+    channel with no existing schedule entry (e.g. a bug, or a genuinely new
+    channel passed by mistake) must not silently drop it — fall back to a
+    full regenerate() instead."""
+    from libtv import generator
+
+    _with_library(monkeypatch)
+    generator.regenerate()
+    definitions = generator.load_channel_defs()
+    definitions.append({
+        "id": "libtv.custom.1", "name": "New", "type": "movies",
+        "genres": [], "studios": [], "year_from": None, "year_to": None,
+        "order": "random",
+    })
+    # Real callers (manage._apply) always save before relabeling/regenerating;
+    # the fallback path reads channels.json from disk (via regenerate()), not
+    # the in-memory `definitions` list, so this must be persisted first too.
+    generator.save_channel_defs(definitions)
+
+    data = generator.relabel_schedule(definitions)
+
+    ids = {ch["id"] for ch in data["channels"]}
+    assert "libtv.custom.1" in ids, "must fall back to a real fetch, not silently drop the channel"
+
+
 def test_runtime_cache_round_trips(monkeypatch):
     from libtv import generator
 
