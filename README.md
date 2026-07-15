@@ -34,8 +34,13 @@ from the same schedule, so the guide and playback always agree.
 
 - **Custom channels**: out of the box you get two channels (all Movies, all
   TV Shows), and **Manage channels** (in the add-on menu and settings) lets
-  you build your own — movie or TV-show channels filtered by genre, studio,
-  and production years, with full control over channel names and order.
+  you build your own — movie, TV-show, or mixed (movies and TV shows
+  together) channels filtered by genre, studio, and production years, with
+  full control over channel names and lineup order.
+- **Content order** per channel: Random (default — a day-stable random
+  sample of the whole filtered library, so a channel with more content than
+  the item cap doesn't just end up replaying the same couple of
+  alphabetically-first shows/movies forever), A–Z, or Recently added.
 - After every rebuild LibTV automatically reloads IPTV Simple (unless
   something is playing), so lineup and guide changes show up without
   restarting Kodi.

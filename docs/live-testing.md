@@ -112,6 +112,19 @@ rebuilds — see the packaging gotchas in `CLAUDE.md`.) Then in Kodi:
   - **Add** a channel (e.g. Movies, one genre, a year range) → it appears in
     the list, in `channels.json`, and — after the automatic rebuild+refresh —
     in the TV guide with only matching items scheduled.
+  - **Add a Mixed channel** (movies and TV shows in one channel) → the guide
+    shows both movies and episodes interleaved on that channel, episode
+    entries still get the show title / `SxxEyy` treatment, and genre/studio
+    filter pickers offer values from both movies and TV shows.
+  - **Content order** — on a library with more shows than `max_items`, set a
+    TV-show channel's order to **Random**: after a rebuild the guide should
+    show programmes from *more than* the first couple of alphabetically-first
+    shows (this is the bug this feature fixes — confirm it actually varies,
+    not just that the option exists). Regenerate again without changing the
+    day and confirm what's on air right now is unchanged (day-stable
+    selection). Switch the same channel to **A–Z** and confirm the guide
+    settles to a fixed, alphabetically-first set of shows; switch to
+    **Recently added** and confirm it's the most-recently-added items.
   - **Rename** → guide shows the new name on the *same* channel
     (`channels.json` id unchanged).
   - **Move up/down** → channel order changes in the guide after refresh.

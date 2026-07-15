@@ -46,13 +46,27 @@ def _ask_year(dialog, heading, current):
         return None
 
 
+_ORDER_LABELS = {"random": "Random", "az": "A–Z", "newest": "Recently added"}
+
+
+def _ask_order(dialog, current):
+    values = list(channels.ORDERS)
+    labels = [_ORDER_LABELS[v] for v in values]
+    preselect = values.index(current) if current in values else 0
+    choice = dialog.select("Content order", labels, preselect=preselect)
+    return values[choice] if choice >= 0 else current
+
+
 def _edit_filters(dialog, defn):
-    """Walk the user through the filter dialogs, mutating defn in place.
+    """Walk the user through the content-order and filter dialogs, mutating
+    defn in place.
 
     Empty selections mean "no filter". Pickers whose library query returns
     nothing (e.g. no studios scraped) are skipped; cancelling a multiselect
-    keeps the current selection.
+    keeps the current selection. Cancelling the order picker also keeps the
+    current value (it defaults to "random" for new channels).
     """
+    defn["order"] = _ask_order(dialog, defn.get("order", "random"))
     genres = library.fetch_genres(defn["type"])
     if genres:
         preselect = [i for i, g in enumerate(genres) if g in defn["genres"]]
@@ -69,9 +83,13 @@ def _edit_filters(dialog, defn):
     defn["year_to"] = _ask_year(dialog, "Last year (blank = no limit)", defn.get("year_to"))
 
 
+_KINDS = ["Movies", "TV shows", "Mixed (Movies & TV shows)"]
+_KIND_TYPES = ["movies", "episodes", "mixed"]
+
+
 def add_channel(handle):
     dialog = xbmcgui.Dialog()
-    kind = dialog.select("Channel type", ["Movies", "TV shows"])
+    kind = dialog.select("Channel type", _KINDS)
     if kind < 0:
         return _done(handle)
     name = dialog.input("Channel name")
@@ -81,11 +99,12 @@ def add_channel(handle):
     defn = {
         "id": channels.next_id(definitions),
         "name": name,
-        "type": "movies" if kind == 0 else "episodes",
+        "type": _KIND_TYPES[kind],
         "genres": [],
         "studios": [],
         "year_from": None,
         "year_to": None,
+        "order": "random",
     }
     _edit_filters(dialog, defn)
     definitions.append(defn)
@@ -102,7 +121,7 @@ def channel_options(handle, channel_id):
         return _done(handle)
 
     choice = dialog.select(
-        defn["name"], ["Rename", "Edit filters", "Move up", "Move down", "Delete"]
+        defn["name"], ["Rename", "Edit filters & order", "Move up", "Move down", "Delete"]
     )
     changed = False
     if choice == 0:

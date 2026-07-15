@@ -73,10 +73,10 @@ def regenerate():
     epg_hours = _int_setting(addon, "epg_hours", 24)
     shuffle = addon.getSettingBool("shuffle")
 
-    lineup = library.fetch_channels(load_channel_defs(), max_items)
-
     now = time.time()
     anchor = schedule.day_anchor(now)
+    lineup = library.fetch_channels(load_channel_defs(), max_items, anchor)
+
     if shuffle:
         for ch in lineup:
             ch["items"] = schedule.shuffled(ch["id"], ch["items"], anchor)

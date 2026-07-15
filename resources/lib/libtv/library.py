@@ -5,7 +5,7 @@ import json
 
 import xbmc
 
-from libtv import channels
+from libtv import channels, schedule
 
 # "streamdetails" must stay in these lists even though the values are only
 # used as a fallback: Kodi fills `runtime` from stream details ONLY when
@@ -18,10 +18,17 @@ EPISODE_PROPS = [
     "streamdetails",
 ]
 
-# channel type -> (method, result key, properties)
-_MEDIA = {
+# media kind -> (method, result key, properties)
+_QUERIES = {
     "movies": ("VideoLibrary.GetMovies", "movies", MOVIE_PROPS),
     "episodes": ("VideoLibrary.GetEpisodes", "episodes", EPISODE_PROPS),
+}
+
+# channel type -> which media kinds to query
+_MEDIA = {
+    "movies": ("movies",),
+    "episodes": ("episodes",),
+    "mixed": ("movies", "episodes"),
 }
 
 
@@ -48,18 +55,40 @@ def _resolve_runtime(item):
     return item
 
 
-def fetch_channels(definitions, max_items):
+def fetch_channels(definitions, max_items, anchor_epoch):
     """Query the library per channel definition and return raw channel
-    definitions (unscheduled). Filters run server-side in Kodi's database."""
+    definitions (unscheduled). Filters run server-side in Kodi's database.
+
+    Mixed channels query both movies and episodes and combine the results;
+    `max_items` caps the combined per-channel total, not each query.
+
+    Selection depends on the channel's `order` (channels.build_sort):
+    "az"/"newest" ask Kodi to sort and limit server-side, so the cap always
+    lands on the same alphabetically/recency-first slice. "random" (the
+    default) instead pulls the whole filtered set and picks a day-stable
+    random sample via `schedule.shuffled`, seeded on `anchor_epoch` — a plain
+    server-side random sort would re-randomize on every regeneration and
+    violate the "schedule is stable within a day" invariant.
+    """
     out = []
     for defn in definitions:
-        method, key, props = _MEDIA[defn["type"]]
-        params = {"properties": props}
         filt = channels.build_filter(defn)
-        if filt:
-            params["filter"] = filt
-        items = json_rpc(method, params).get(key, [])[:max_items]
-        items = [_resolve_runtime(item) for item in items]
+        sort = channels.build_sort(defn)
+        items = []
+        for kind in _MEDIA[defn["type"]]:
+            method, key, props = _QUERIES[kind]
+            params = {"properties": props}
+            if filt:
+                params["filter"] = filt
+            if sort:
+                params["sort"] = sort
+                params["limits"] = {"start": 0, "end": max_items}
+            fetched = json_rpc(method, params).get(key, [])
+            items.extend(_resolve_runtime(item) for item in fetched)
+        if sort:
+            items = items[:max_items]
+        else:
+            items = schedule.shuffled(defn["id"], items, anchor_epoch)[:max_items]
         out.append({
             "id": defn["id"],
             "name": defn["name"],
@@ -70,13 +99,18 @@ def fetch_channels(definitions, max_items):
     return out
 
 
+_KODI_LIBRARY_TYPES = {"movies": ("movie",), "episodes": ("tvshow",), "mixed": ("movie", "tvshow")}
+
+
 def fetch_genres(channel_type):
     """All library genre labels for a channel type, for the filter picker."""
-    kodi_type = "movie" if channel_type == "movies" else "tvshow"
-    result = json_rpc(
-        "VideoLibrary.GetGenres", {"type": kodi_type, "sort": {"method": "label"}}
-    )
-    return [g["label"] for g in result.get("genres", []) if g.get("label")]
+    labels = set()
+    for kodi_type in _KODI_LIBRARY_TYPES[channel_type]:
+        result = json_rpc(
+            "VideoLibrary.GetGenres", {"type": kodi_type, "sort": {"method": "label"}}
+        )
+        labels.update(g["label"] for g in result.get("genres", []) if g.get("label"))
+    return sorted(labels)
 
 
 def fetch_studios(channel_type):
@@ -85,12 +119,13 @@ def fetch_studios(channel_type):
     JSON-RPC has no VideoLibrary.GetStudios, so aggregate from the items
     (shows for episode channels — episodes inherit their show's studio).
     """
-    if channel_type == "movies":
-        method, key = "VideoLibrary.GetMovies", "movies"
-    else:
-        method, key = "VideoLibrary.GetTVShows", "tvshows"
-    items = json_rpc(method, {"properties": ["studio"]}).get(key, [])
     studios = set()
-    for item in items:
-        studios.update(s for s in item.get("studio") or [] if s)
+    for kodi_type in _KODI_LIBRARY_TYPES[channel_type]:
+        method, key = (
+            ("VideoLibrary.GetMovies", "movies") if kodi_type == "movie"
+            else ("VideoLibrary.GetTVShows", "tvshows")
+        )
+        items = json_rpc(method, {"properties": ["studio"]}).get(key, [])
+        for item in items:
+            studios.update(s for s in item.get("studio") or [] if s)
     return sorted(studios)

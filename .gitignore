@@ -234,3 +234,9 @@ resources/media/*.png
 resources/media/*.jpg
 
 .devcontainer/devcontainer-lock.json
+
+# Claude Code config dir must never land inside the workspace (CLAUDE_CONFIG_DIR
+# in devcontainer.json is an absolute container path now, but this is a
+# belt-and-braces guard against it ever being misconfigured as relative again —
+# this tree can contain OAuth credentials).
+/home/

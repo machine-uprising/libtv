@@ -3,20 +3,33 @@
 No Kodi imports. A channel definition looks like:
 
     {"id": "libtv.custom.1", "name": "80s Action", "type": "movies",
-     "genres": ["Action"], "studios": [], "year_from": 1980, "year_to": 1989}
+     "genres": ["Action"], "studios": [], "year_from": 1980, "year_to": 1989,
+     "order": "random"}
 
-`type` is "movies" or "episodes". Empty filter fields mean "no filter".
-The list order in channels.json is the channel (and therefore guide) order.
-Channel ids are assigned once and never change — the deterministic shuffle
-seed and the PVR channel identity both key off them, so renames and reorders
-must not touch ids.
+`type` is "movies", "episodes", or "mixed" (both movies and episodes in one
+channel). Empty filter fields mean "no filter". `order` controls which items
+are selected out of a larger library and their base sequence — see ORDERS
+below; "random" is the default and is what gives a channel variety instead of
+always the same handful of alphabetically-first shows once the library
+exceeds `max_items`. The list order in channels.json is the channel (and
+therefore guide) order. Channel ids are assigned once and never change — the
+deterministic shuffle seed and the PVR channel identity both key off them, so
+renames and reorders must not touch ids.
 """
 from __future__ import annotations
 
 import json
 import re
 
-TYPES = ("movies", "episodes")
+TYPES = ("movies", "episodes", "mixed")
+
+# "random" draws a day-stable random sample from the whole filtered library
+# (library.fetch_channels + schedule.shuffled) — the only order that isn't
+# dominated by whatever a handful of early-alphabet items happen to be.
+# "az"/"newest" ask Kodi to sort+limit server-side, so they are inherently
+# capped at literally the first `max_items` matches, oldest-alphabet or
+# newest-added first.
+ORDERS = ("random", "az", "newest")
 
 _CUSTOM_ID = re.compile(r"libtv\.custom\.(\d+)$")
 
@@ -25,9 +38,11 @@ def default_lineup():
     """The original hardcoded lineup, used when no channels.json exists."""
     return [
         {"id": "libtv.movies", "name": "Movies", "type": "movies",
-         "genres": [], "studios": [], "year_from": None, "year_to": None},
+         "genres": [], "studios": [], "year_from": None, "year_to": None,
+         "order": "random"},
         {"id": "libtv.tv", "name": "TV Shows", "type": "episodes",
-         "genres": [], "studios": [], "year_from": None, "year_to": None},
+         "genres": [], "studios": [], "year_from": None, "year_to": None,
+         "order": "random"},
     ]
 
 
@@ -52,6 +67,7 @@ def _normalize(entry):
         "studios": [str(s) for s in entry.get("studios") or []],
         "year_from": _year(entry.get("year_from")),
         "year_to": _year(entry.get("year_to")),
+        "order": entry.get("order") if entry.get("order") in ORDERS else "random",
     }
 
 
@@ -105,13 +121,19 @@ def move(definitions, channel_id, delta):
     return False
 
 
+_GROUP_LABELS = {"movies": "Movies", "episodes": "TV", "mixed": "Mixed"}
+_KIND_LABELS = {"movies": "Movies", "episodes": "TV shows", "mixed": "Movies & TV shows"}
+# "random" is the default and left off the summary; only call out the others.
+_ORDER_LABELS = {"az": "A–Z", "newest": "Recently added"}
+
+
 def group(defn):
-    return "Movies" if defn["type"] == "movies" else "TV"
+    return _GROUP_LABELS[defn["type"]]
 
 
 def describe(defn):
-    """One-line human summary of a channel's source and filters."""
-    parts = ["Movies" if defn["type"] == "movies" else "TV shows"]
+    """One-line human summary of a channel's source, filters, and order."""
+    parts = [_KIND_LABELS[defn["type"]]]
     if defn.get("genres"):
         parts.append(", ".join(defn["genres"]))
     if defn.get("studios"):
@@ -119,6 +141,9 @@ def describe(defn):
     year_from, year_to = defn.get("year_from"), defn.get("year_to")
     if year_from or year_to:
         parts.append(f"{year_from or '…'}–{year_to or '…'}")
+    order_label = _ORDER_LABELS.get(defn.get("order"))
+    if order_label:
+        parts.append(order_label)
     return " • ".join(parts)
 
 
@@ -148,3 +173,20 @@ def build_filter(defn):
     if not rules:
         return None
     return rules[0] if len(rules) == 1 else {"and": rules}
+
+
+_SORT = {
+    "az": {"method": "title", "order": "ascending", "ignorearticle": True},
+    "newest": {"method": "dateadded", "order": "descending"},
+}
+
+
+def build_sort(defn):
+    """Kodi JSON-RPC List.Sort for this channel's order, or None for "random".
+
+    "random" has no Kodi-side sort: library.fetch_channels instead pulls the
+    whole filtered set and picks a day-stable random sample itself, since
+    Kodi's own "random" sort method re-randomizes on every query and would
+    violate schedule stability within a day.
+    """
+    return _SORT.get(defn.get("order"))

@@ -4,16 +4,33 @@
     "features": {
         "ghcr.io/devcontainers-extra/features/poetry:2": {}
     },
-    "postCreateCommand": "poetry install",
+    //"postCreateCommand": "poetry install",
+    "postCreateCommand": "bash .devcontainer/post-create.sh",
+    "containerEnv": {
+        "POETRY_VIRTUALENVS_CREATE": "true",
+        "POETRY_VIRTUALENVS_IN_PROJECT": "true",
+        "CLAUDE_CONFIG_DIR": "/home/vscode/.claude"
+    },
     "customizations": {
         "vscode": {
             "extensions": [
                 "ms-python.python",
                 "charliermarsh.ruff",
-                "tamasfe.even-better-toml"
+                "tamasfe.even-better-toml",
+                "ms-python.vscode-pylance",
+                "ms-python.pylint",
+                "ms-python.python",
+                "ms-python.debugpy",
+                "manishsencha.readme-preview",
+                "ms-vscode.makefile-tools",
+                "Anthropic.claude-code",
+                "vscode-icons-team.vscode-icons"
             ],
             "settings": {
                 "python.defaultInterpreterPath": "${containerWorkspaceFolder}/.venv/bin/python",
+                "python.terminal.activeEnvironment": true,
+                "python.terminal.activateEnvInCurrentTerminal": true,
+                "python.poetryPath": "poetry",
                 "python.testing.pytestEnabled": true
             }
         }

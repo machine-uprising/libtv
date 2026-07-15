@@ -63,10 +63,34 @@ def test_add_channel_flow_saves_filters_and_rebuilds(monkeypatch):
     assert added[0] == {
         "id": "libtv.custom.1", "name": "80s Action", "type": "movies",
         "genres": ["Action"], "studios": [], "year_from": 1980, "year_to": 1989,
+        "order": "random",
     }
     # Rebuilt immediately: the new channel is live in the schedule.
     schedule = generator.load_schedule()
     assert "libtv.custom.1" in [ch["id"] for ch in schedule["channels"]]
+    assert _refreshed()
+
+
+def test_add_mixed_channel_pulls_movies_and_episodes(monkeypatch):
+    _with_library(monkeypatch)
+    conftest.DIALOG_RESPONSES["select"].append(2)  # type: Mixed
+    conftest.DIALOG_RESPONSES["input"].extend(["Everything", "", ""])
+    conftest.DIALOG_RESPONSES["multiselect"].append([])  # genres: none
+
+    _run_plugin(monkeypatch, "?action=channel_add")
+
+    defs = generator.load_channel_defs()
+    added = [d for d in defs if d["id"] == "libtv.custom.1"]
+    assert added == [{
+        "id": "libtv.custom.1", "name": "Everything", "type": "mixed",
+        "genres": [], "studios": [], "year_from": None, "year_to": None,
+        "order": "random",
+    }]
+    schedule = generator.load_schedule()
+    ch = next(c for c in schedule["channels"] if c["id"] == "libtv.custom.1")
+    titles = {p["title"] for p in ch["programmes"]}
+    assert "Movie A" in titles
+    assert "Pilot" in titles
     assert _refreshed()
 
 
@@ -89,6 +113,24 @@ def test_rename_channel(monkeypatch):
     defs = generator.load_channel_defs()
     renamed = [d for d in defs if d["id"] == "libtv.tv"]
     assert renamed[0]["name"] == "Retro TV", "rename must keep the channel id"
+    assert _refreshed()
+
+
+def test_edit_content_order(monkeypatch):
+    _with_library(monkeypatch)
+    conftest.DIALOG_RESPONSES["select"].extend([1, 1])  # Edit filters & order, then order: A-Z
+    conftest.DIALOG_RESPONSES["multiselect"].append([])  # genres: none
+    conftest.DIALOG_RESPONSES["input"].extend(["", ""])  # year bounds: blank
+
+    _run_plugin(monkeypatch, "?action=channel_options&channel=libtv.tv")
+
+    defs = generator.load_channel_defs()
+    edited = [d for d in defs if d["id"] == "libtv.tv"][0]
+    assert edited["order"] == "az"
+    # The rebuild must have asked Kodi to sort+limit server-side for "az".
+    call = next(c for c in conftest.CALLS if c[1] == "VideoLibrary.GetEpisodes")
+    assert call[2]["sort"] == {"method": "title", "order": "ascending", "ignorearticle": True}
+    assert call[2]["limits"] == {"start": 0, "end": 150}
     assert _refreshed()
 
 

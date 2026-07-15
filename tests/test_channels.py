@@ -7,7 +7,8 @@ from libtv import channels
 
 def _custom(**overrides):
     defn = {"id": "libtv.custom.1", "name": "80s Action", "type": "movies",
-            "genres": [], "studios": [], "year_from": None, "year_to": None}
+            "genres": [], "studios": [], "year_from": None, "year_to": None,
+            "order": "random"}
     defn.update(overrides)
     return defn
 
@@ -36,6 +37,22 @@ def test_load_respects_deliberately_empty_lineup(tmp_path):
     path = tmp_path / "channels.json"
     path.write_text(json.dumps({"version": 1, "channels": []}), encoding="utf-8")
     assert channels.load(str(path)) == []
+
+
+def test_load_defaults_missing_order_to_random_for_backward_compatibility(tmp_path):
+    path = tmp_path / "channels.json"
+    path.write_text(json.dumps({"version": 1, "channels": [
+        {"id": "libtv.custom.1", "name": "Old channel", "type": "movies"},
+    ]}), encoding="utf-8")
+    assert channels.load(str(path))[0]["order"] == "random"
+
+
+def test_load_drops_invalid_order(tmp_path):
+    path = tmp_path / "channels.json"
+    path.write_text(json.dumps({"version": 1, "channels": [
+        {"id": "libtv.custom.1", "name": "X", "type": "movies", "order": "shuffle-everything"},
+    ]}), encoding="utf-8")
+    assert channels.load(str(path))[0]["order"] == "random"
 
 
 def test_load_drops_malformed_entries(tmp_path):
@@ -117,3 +134,29 @@ def test_describe_summarizes_filters():
     assert "Action" in text
     assert "1980–1989" in text
     assert channels.describe(_custom(type="episodes")) == "TV shows"
+    assert channels.describe(_custom(type="mixed")) == "Movies & TV shows"
+
+
+def test_mixed_type_is_valid_and_groups_separately():
+    assert "mixed" in channels.TYPES
+    assert channels.group(_custom(type="mixed")) == "Mixed"
+
+
+def test_describe_shows_non_default_order():
+    assert "A–Z" in channels.describe(_custom(order="az"))
+    assert "Recently added" in channels.describe(_custom(order="newest"))
+    assert "Random" not in channels.describe(_custom(order="random")), \
+        "the default order is left off the summary"
+
+
+def test_build_sort_random_is_none():
+    assert channels.build_sort(_custom(order="random")) is None
+
+
+def test_build_sort_az_and_newest():
+    assert channels.build_sort(_custom(order="az")) == {
+        "method": "title", "order": "ascending", "ignorearticle": True
+    }
+    assert channels.build_sort(_custom(order="newest")) == {
+        "method": "dateadded", "order": "descending"
+    }

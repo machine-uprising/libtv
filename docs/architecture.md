@@ -43,11 +43,11 @@ inputs for Kodi's native PVR stack and resolves streams on demand:
 | `default.py`, `service.py` | Thin entry shims (≤15 lines each, enforced by kodi-addon-checker). Add `resources/lib` to `sys.path` and delegate. |
 | `resources/lib/libtv/schedule.py` | **Pure.** Schedule building and lookup. No Kodi imports. |
 | `resources/lib/libtv/writers.py` | **Pure.** Renders M3U and XMLTV strings from a schedule dict. |
-| `resources/lib/libtv/channels.py` | **Pure.** Channel-lineup configuration: `channels.json` load/save, default lineup, id allocation, reorder, and JSON-RPC filter building. |
-| `resources/lib/libtv/library.py` | Kodi JSON-RPC library queries (`VideoLibrary.GetMovies` / `GetEpisodes`, filtered per channel definition) plus genre/studio pickers for the management UI. Resolves each item's runtime, falling back to stream-details duration (§4). |
+| `resources/lib/libtv/channels.py` | **Pure.** Channel-lineup configuration: `channels.json` load/save, default lineup, id allocation, reorder, JSON-RPC filter building (`build_filter`), and per-channel selection-order building (`build_sort`). |
+| `resources/lib/libtv/library.py` | Kodi JSON-RPC library queries (`VideoLibrary.GetMovies` / `GetEpisodes`, filtered and sorted per channel definition) plus genre/studio pickers for the management UI. Resolves each item's runtime, falling back to stream-details duration (§4); for `order: random` also does the day-stable selection (§4). |
 | `resources/lib/libtv/generator.py` | Orchestration: fetch → schedule → write all artifacts. Owns the profile directory, the pending-seek handoff files, and the PVR refresh (`refresh_pvr`). |
 | `resources/lib/libtv/plugin.py` | Plugin routing: menu, build action, and the stream resolver (`play`). |
-| `resources/lib/libtv/manage.py` | Dialog-driven channel management UI (add/rename/filter/reorder/delete). |
+| `resources/lib/libtv/manage.py` | Dialog-driven channel management UI (add/rename/filter/order/reorder/delete). |
 | `resources/lib/libtv/daemon.py` | Service loop (periodic regeneration) + `JoinInProgressPlayer` (the seek half of join-in-progress). |
 | `resources/settings.xml` + `resources/language/…/strings.po` | New-format settings; labels are msgids in the 32100 range. |
 
@@ -65,13 +65,16 @@ deleted every channel.
   "channels": [
     {
       "id": "libtv.custom.1", "name": "80s Action", "type": "movies",
-      "genres": ["Action"], "studios": [], "year_from": 1980, "year_to": 1989
+      "genres": ["Action"], "studios": [], "year_from": 1980, "year_to": 1989,
+      "order": "random"
     }
   ]
 }
 ```
 
-- `type` is `movies` or `episodes`. Empty filter fields mean "no filter".
+- `type` is `movies`, `episodes`, or `mixed` (movies and episodes combined in
+  one channel, queried and merged by `library.fetch_channels`). Empty filter
+  fields mean "no filter".
 - **List order is channel order** — it drives the M3U order and therefore the
   guide order. Reordering is just reordering the list.
 - **Ids are allocated once (`libtv.custom.<n>`) and never change or get
@@ -83,30 +86,63 @@ deleted every channel.
   dimensions AND together, and year bounds become exclusive
   `greaterthan`/`lessthan` rules with **string** values (Kodi rejects
   numbers). For episode channels, genre/studio/year filter on the episode's
-  own metadata (year = year aired; studio inherited from the show).
+  own metadata (year = year aired; studio inherited from the show). A `mixed`
+  channel applies the same filter to both the `GetMovies` and `GetEpisodes`
+  queries.
+- `order` (`channels.ORDERS`: `random` / `az` / `newest`, default `random`)
+  controls which items are pulled out of a filtered set larger than
+  `max_items`, and their base sequence — see §4 for how each is implemented.
+  Missing/invalid `order` values (older `channels.json` files predate this
+  field) normalize to `random`.
 - The management UI (`manage.py`, reachable from the add-on menu and a
   settings button) edits the file via dialogs; every mutation saves,
   rebuilds all artifacts, and refreshes the PVR client immediately. Genre
   and studio pickers are populated from the library (`library.fetch_genres`,
   `library.fetch_studios` — JSON-RPC has no `GetStudios`, so studios are
-  aggregated from movie/show items).
+  aggregated from movie/show items); for a `mixed` channel these union the
+  movie and tvshow results.
 
 ## 4. The schedule model
 
 Built in `schedule.build_schedule`, persisted as `schedule.json`.
 
 - **Channels** come from the lineup above (`library.fetch_channels`), each
-  capped at `max_items` items.
+  capped at `max_items` items. For a `mixed` channel, movies and episodes are
+  fetched separately (each honoring the channel's filter) and concatenated
+  *before* the cap is applied, so `max_items` bounds the combined total, not
+  each media kind.
+- **Selection honors the channel's `order`** (`channels.build_sort`):
+  - `az`/`newest` ask Kodi to sort (`title` asc / `dateadded` desc) and
+    apply `List.Limits {start: 0, end: max_items}` **server-side**, so the
+    cap always lands on literally the first `max_items` matches in that
+    order.
+  - `random` (the default) does **not** use Kodi's own `random` sort method
+    — that re-randomizes on every JSON-RPC call, which would pick a
+    different subset every regeneration and break the "stable within a day"
+    invariant below. Instead `library.fetch_channels` pulls the *entire*
+    filtered set (no `sort`/`limits` params) and calls
+    `schedule.shuffled(channel_id, items, anchor)` itself, then takes the
+    first `max_items` — a day-stable random sample of the whole library, not
+    just whatever a handful of alphabetically-first shows/movies happen to
+    be. (This is the fix for a channel that only ever seems to contain 1-2
+    shows once the library exceeds the cap.)
 - **Programmes are contiguous**: each channel's programmes run back-to-back
   from the anchor with no gaps, **cycling** through the item list until the
   guide horizon (`now + epg_hours`) is covered — like a real linear station.
-- **Anchor**: midnight UTC of the current day (`schedule.day_anchor`). The
-  schedule is built from the anchor, not from "now", so what is on air at any
-  instant is a pure function of (channel, items, day).
-- **Deterministic shuffle**: when `shuffle` is on, items are ordered by
-  `random.Random(f"{channel_id}:{anchor}")` (`schedule.shuffled`). Same
-  channel + same day ⇒ same order. **Invariant: regenerating during the day
-  must never change what is currently on air.**
+- **Anchor**: midnight UTC of the current day (`schedule.day_anchor`),
+  computed once in `generator.regenerate()` and threaded into both
+  `library.fetch_channels` (for `random`-order selection above) and the
+  optional global reshuffle below. The schedule is built from the anchor,
+  not from "now", so what is on air at any instant is a pure function of
+  (channel, items, day).
+- **Deterministic global reshuffle**: independent of per-channel `order`,
+  when the `shuffle` *setting* is on, every channel's already-selected items
+  are additionally reordered by `random.Random(f"{channel_id}:{anchor}")`
+  (`schedule.shuffled`) before scheduling — this only changes playback
+  sequence, not which items were selected. Same channel + same day ⇒ same
+  order. **Invariant: regenerating during the day must never change what is
+  currently on air** — this is why both the `random`-order selection and the
+  global reshuffle key off the same day anchor rather than wall-clock time.
 - **Runtimes are SECONDS** (Kodi JSON-RPC convention). `library.py` must
   request the `streamdetails` property alongside `runtime`: Kodi only fills
   an episode's `runtime` from the file's stream details when stream details
@@ -228,8 +264,8 @@ regenerates on a schedule miss, and a toggle mid-tune would abort the tune.
 
 | id | type | default | effect |
 | --- | --- | --- | --- |
-| `max_items` | integer 10–1000 | 150 | Cap on library items pulled per channel. |
-| `shuffle` | boolean | true | Deterministic per-day shuffle vs library order. |
+| `max_items` | integer 10–1000 | 150 | Cap on library items pulled per channel (§3/§4 `order` controls *which* items land within the cap). |
+| `shuffle` | boolean | true | Deterministic per-day reshuffle of each channel's already-selected items, on top of the per-channel `order`. |
 | `epg_hours` | integer 6–72 | 24 | Guide horizon: schedule covers `now + epg_hours`. |
 | `regen_interval_hours` | integer 1–24 | 6 | Service regeneration period. |
 | `join_in_progress` | boolean | true | Seek into the current programme on tune (§6). |

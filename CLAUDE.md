@@ -165,7 +165,12 @@ encouraged for diagnosis.
   and shuffle with a seed of `channel_id:anchor` (`schedule.shuffled`), so a
   regeneration at 15:00 must not change what was on air at 14:59. Don't
   introduce nondeterminism (unseeded shuffle, now-anchored schedules) into
-  schedule building.
+  schedule building. This is also why a channel's `order: random` selection
+  (`library.fetch_channels`) must never use Kodi's own JSON-RPC `List.Sort`
+  method `"random"` — it re-randomizes on every call, so capping its output
+  at `max_items` would pick a different item set on every regeneration.
+  Instead fetch the full filtered set unsorted and pick the day-stable
+  sample with `schedule.shuffled(channel_id, items, anchor)`.
 - **`schedule.json` is the contract between generator and resolver.** The
   XMLTV guide, the M3U, and playback resolution all derive from the same
   persisted schedule; never compute "what's on" from anything else.
