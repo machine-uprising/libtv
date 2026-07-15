@@ -232,3 +232,5 @@ Thumbs.db
 # Generated files (but keep them in .gitignore for dev)
 resources/media/*.png
 resources/media/*.jpg
+
+.devcontainer/devcontainer-lock.json
