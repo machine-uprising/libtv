@@ -232,6 +232,39 @@ rebuilds — see the packaging gotchas in `CLAUDE.md`.) Then in Kodi:
   playback, so this is worth a quick log check if it comes up rather than a
   dedicated repro.
 
+## 5a. In-playback EPG overlay
+
+New in this release: a "LibTV guide (Now/Next)" entry in the video context
+menu while a channel is playing, opening a code-only overlay listing every
+channel's current/next programme (`docs/architecture.md` §6a). Neither the
+`kodi.context.item` trigger nor the `xbmcgui.WindowDialog` rendering can be
+unit-tested — this is the first verification pass for both.
+
+- **Context-menu entry appears** — while a LibTV channel is playing, open
+  the context menu (remote's context/menu button, or `c` on a keyboard) and
+  confirm **"LibTV guide (Now/Next)"** is listed. Confirm it does *not*
+  appear when nothing is playing.
+- **Playback is undisturbed** — opening the overlay must not
+  pause/stop/hiccup the underlying stream. Test against an actual **PVR
+  IPTV Simple** channel specifically, not just a regular library video —
+  this project has repeatedly found PVR-resolved streams behave differently
+  from regular playback (`StartOffset` ignored, resolver script termination
+  on channel change), so this is not assumed to just work by analogy.
+- **Now/Next text is correct** — cross-check at least two channels' rows
+  against `schedule.json`, including one channel near a programme boundary
+  (confirm the "Next" title flips at the right moment).
+- **Selecting a row tunes there** — picking a different channel's row
+  closes the overlay and switches to it via
+  `PlayMedia(plugin://plugin.video.libtv/?action=play&channel=<id>)`; the
+  new channel plays whatever the schedule says is on air now (same as a
+  normal zap).
+- **Back/escape closes without switching** — confirm the currently playing
+  channel is unaffected.
+- **No PVR refresh happens** — while using the overlay, the log must show
+  no `LibTV: toggled IPTV Simple to reload channels and guide` or
+  `Addons.SetAddonEnabled` calls; the overlay is read-only against
+  `schedule.json` and must never regenerate or refresh the PVR client.
+
 ## 6. Sanity-check the library over JSON-RPC
 
 `scripts/sanity_check.py` queries a running Kodi's HTTP JSON-RPC endpoint with

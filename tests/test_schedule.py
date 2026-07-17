@@ -117,6 +117,42 @@ def test_find_current_misses():
     assert schedule.find_current(data, "libtv.movies", beyond) is None, "stale schedule"
 
 
+def test_find_now_and_next_returns_current_and_upcoming():
+    data = schedule.build_schedule(CHANNELS, ANCHOR, ANCHOR + 6 * 3600)
+    current, upcoming = schedule.find_now_and_next(data, "libtv.movies", ANCHOR + 1800)
+    assert current["title"] == "Movie A"
+    assert upcoming["title"] == "Movie B"
+
+
+def test_find_now_and_next_last_programme_has_no_next():
+    data = schedule.build_schedule(CHANNELS, ANCHOR, ANCHOR + 1)
+    programmes = data["channels"][0]["programmes"]
+    assert len(programmes) == 1, "horizon just past anchor should give a single programme"
+    current, upcoming = schedule.find_now_and_next(data, "libtv.movies", ANCHOR)
+    assert current["title"] == "Movie A"
+    assert upcoming is None
+
+
+def test_find_now_and_next_unknown_channel():
+    data = schedule.build_schedule(CHANNELS, ANCHOR, ANCHOR + 3600)
+    assert schedule.find_now_and_next(data, "libtv.unknown", ANCHOR) == (None, None)
+
+
+def test_find_now_and_next_stale_schedule_returns_none_current():
+    data = schedule.build_schedule(CHANNELS, ANCHOR, ANCHOR + 3600)
+    beyond = data["channels"][0]["programmes"][-1]["stop"] + 10
+    current, upcoming = schedule.find_now_and_next(data, "libtv.movies", beyond)
+    assert current is None
+    assert upcoming is None
+
+
+def test_find_now_and_next_before_first_programme():
+    data = schedule.build_schedule(CHANNELS, ANCHOR, ANCHOR + 3600)
+    current, upcoming = schedule.find_now_and_next(data, "libtv.movies", ANCHOR - 100)
+    assert current is None
+    assert upcoming["title"] == "Movie A"
+
+
 def test_shuffle_is_deterministic_per_day():
     items = [{"title": f"T{i}"} for i in range(20)]
     a = schedule.shuffled("ch", items, ANCHOR)

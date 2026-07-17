@@ -112,3 +112,25 @@ def find_current(schedule_data, channel_id, now_epoch):
                 return prog, now_epoch - prog["start"]
         return None
     return None
+
+
+def find_now_and_next(schedule_data, channel_id, now_epoch):
+    """Return (current_or_None, next_or_None) for channel_id at now_epoch.
+
+    Unlike find_current, a miss here is a normal, expected outcome (nothing
+    airing right now, or no programme scheduled after the current one) —
+    callers must not treat it as a signal to regenerate the schedule. Used
+    by the read-only EPG overlay, which must never trigger a regeneration.
+    """
+    for ch in schedule_data.get("channels", []):
+        if ch["id"] != channel_id:
+            continue
+        programmes = ch["programmes"]
+        for i, prog in enumerate(programmes):
+            if prog["start"] <= now_epoch < prog["stop"]:
+                nxt = programmes[i + 1] if i + 1 < len(programmes) else None
+                return prog, nxt
+            if prog["start"] > now_epoch:
+                return None, prog
+        return None, None
+    return None, None

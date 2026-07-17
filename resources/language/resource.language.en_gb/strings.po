@@ -60,3 +60,7 @@ msgstr ""
 msgctxt "#32112"
 msgid "Auto-generate channels by studio"
 msgstr ""
+
+msgctxt "#32113"
+msgid "LibTV guide (Now/Next)"
+msgstr ""

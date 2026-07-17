@@ -36,8 +36,12 @@ work through its checklist — it maps which document owns what.
 ## Layout
 
 - `addon.xml` — manifest; extension points define how Kodi invokes the code
-- `default.py` / `service.py` — thin entry shims only (see constraint below);
-  they add `resources/lib` to `sys.path` and delegate
+- `default.py` / `service.py` / `context.py` — thin entry shims only (see
+  constraint below); they add `resources/lib` to `sys.path` and delegate.
+  `context.py` backs the `kodi.context.item` extension (in-playback EPG
+  overlay) and is invoked with Kodi's context-menu calling convention, not
+  the `plugin://` argv triple `default.py` gets — never route it through
+  `plugin.run`
 - `resources/lib/libtv/` — the actual code:
   - `schedule.py`, `writers.py`, `channels.py` — **pure logic, no Kodi
     imports** (keep it that way); `channels.py` owns the channel-lineup
@@ -58,6 +62,9 @@ work through its checklist — it maps which document owns what.
   - `daemon.py` — background regeneration loop (`xbmc.Monitor`-based),
     self-healing PVR-refresh retry, join-in-progress seek + observed-runtime
     recording (`JoinInProgressPlayer`)
+  - `overlay.py` — in-playback EPG overlay: a code-only
+    `xbmcgui.WindowDialog` (no skin XML) listing every channel's Now/Next,
+    read-only against `schedule.json` (never regenerates or refreshes PVR)
 - `resources/settings.xml` — new-format (`version="1"`) settings; labels are
   msgid numbers resolved via `resources/language/resource.language.en_gb/strings.po`
 - `tests/conftest.py` — hand-rolled fake `xbmc*` modules that make the add-on
@@ -163,9 +170,15 @@ encouraged for diagnosis.
   and using the 90-minute default — this does not remove the need to keep
   `streamdetails` requested, since the cache only has data for files that
   have actually played at least once.
-- `default.py` and `service.py` must stay ≤15 counted lines
+- `default.py`, `service.py`, and `context.py` must stay ≤15 counted lines
   (kodi-addon-checker "complex entry point" rule) — logic goes in
   `resources/lib/libtv/`.
+- **`kodi.context.item` extension schema**: `<extension point="kodi.context.item">`
+  requires a `<menu id="kodi.core.main">` (or `kodi.core.manage`) wrapper
+  around each `<item>`, and `library` is an attribute of `<item>`, not of
+  `<extension>` — `kodi-addon-checker` rejects both the unwrapped and
+  extension-level-`library` forms (verified against its bundled XSD,
+  `matrix_contextitem.xsd`/`jarvis_contextitem.xsd`).
 - The add-on profile directory does not exist until created — `generator.profile_dir()`
   handles `xbmcvfs.mkdirs`; write files only through it.
 - `addon.xml` changes must pass `kodi-addon-checker`. Valid plugin extension
@@ -257,3 +270,12 @@ see `docs/live-testing.md` for the checklist.
 - XMLTV `star-rating`/`new`/`xmltv_ns` fields depend on the library actually
   reporting `rating`/`playcount` for an item — not yet spot-checked against a
   real scraper's field coverage.
+- The in-playback EPG overlay (`overlay.py`, `docs/architecture.md` §6a) is
+  unit-tested only for its pure `schedule.find_now_and_next` lookup — the
+  `kodi.context.item` trigger and the `WindowDialog`/`ControlList` rendering
+  cannot be faked meaningfully and are **not yet live-verified**: whether the
+  context-menu entry actually appears/behaves correctly in a real Kodi, and
+  whether a code-only overlay window drawn over an actively playing **PVR**
+  stream (as opposed to a regular video) behaves the same way — every other
+  PVR-specific surprise in this project came from PVR streams differing from
+  regular playback. See `docs/live-testing.md`.
