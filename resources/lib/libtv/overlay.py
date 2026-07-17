@@ -94,9 +94,20 @@ class _EpgOverlay(xbmcgui.WindowDialog):
 
 
 def show():
-    """Entry point called by context.py."""
+    """Entry point called by context.py.
+
+    Logs a breadcrumb at each step (invocation, row count, window close,
+    selection) — this path previously failed silently twice in a row (a
+    TypeError with no log line reaching the caller, then a focus failure
+    logged only as a GUI warning with no traceback), so the only way to
+    tell "RunScript never fired" apart from "it ran fine but the window
+    wasn't visible/interactive" is to have explicit markers to check
+    kodi.log against.
+    """
+    xbmc.log("LibTV: overlay.show() invoked", xbmc.LOGINFO)
     data = generator.load_schedule()
     if not data or not data.get("channels"):
+        xbmc.log("LibTV: overlay.show() found no schedule/channels", xbmc.LOGWARNING)
         xbmcgui.Dialog().notification(
             "LibTV", "Guide not built yet", xbmcgui.NOTIFICATION_INFO, 3000
         )
@@ -108,8 +119,11 @@ def show():
         current, upcoming = schedule.find_now_and_next(data, ch["id"], now)
         rows.append((ch["id"], ch["name"], current, upcoming))
 
+    xbmc.log(f"LibTV: overlay showing {len(rows)} channel row(s)", xbmc.LOGINFO)
     overlay = _EpgOverlay(rows)
     overlay.doModal()
+    xbmc.log("LibTV: overlay closed", xbmc.LOGINFO)
     selected = overlay.selected_channel
     if selected:
+        xbmc.log(f"LibTV: overlay selected channel {selected}", xbmc.LOGINFO)
         xbmc.executebuiltin(f"PlayMedia({_PLAY_URL.format(selected)})")
