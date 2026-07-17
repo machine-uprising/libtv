@@ -25,8 +25,9 @@ def test_valid_key_rejects_empty_and_unsafe_input():
 
 def test_render_keymap_xml_binds_runscript_to_the_key():
     xml = keymap.render_keymap_xml("g")
-    assert "<g>RunScript(plugin.video.libtv)</g>" in xml
+    assert xml.count("<g>RunScript(plugin.video.libtv)</g>") == 2
     assert "<FullscreenVideo>" in xml
+    assert "<FullscreenLiveTV>" in xml
 
 
 def test_apply_from_settings_writes_the_keymap_file(monkeypatch):

@@ -29,6 +29,13 @@ def render_keymap_xml(key):
 
     `key` must already be validated (valid_key) — it is interpolated
     directly as an XML element name.
+
+    Bound under both FullscreenVideo and FullscreenLiveTV: live testing
+    found a FullscreenVideo-only binding produces zero effect (not even a
+    log trace of RunScript firing) while a PVR channel is actively playing
+    full-screen — some Kodi versions/skins still route live TV playback
+    through the legacy FullscreenLiveTV window context rather than
+    FullscreenVideo. Binding both is harmless when only one applies.
     """
     return (
         "<keymap>\n"
@@ -37,6 +44,11 @@ def render_keymap_xml(key):
         f"            <{key}>RunScript(plugin.video.libtv)</{key}>\n"
         "        </keyboard>\n"
         "    </FullscreenVideo>\n"
+        "    <FullscreenLiveTV>\n"
+        "        <keyboard>\n"
+        f"            <{key}>RunScript(plugin.video.libtv)</{key}>\n"
+        "        </keyboard>\n"
+        "    </FullscreenLiveTV>\n"
         "</keymap>\n"
     )
 

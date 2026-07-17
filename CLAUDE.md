@@ -284,9 +284,21 @@ see `docs/live-testing.md` for the checklist.
   and is the trigger to document/rely on. A "Hotkey" text setting +
   "Save hotkey now" button (`keymap.apply_from_settings`) writes/removes
   `special://profile/keymaps/libtv.xml` so the user never hand-edits a
-  keymap file. Neither the `RunScript` trigger nor the settings-driven
-  write have themselves been live-verified yet; see `docs/live-testing.md`
-  §5a for the next verification step.
+  keymap file. The settings-driven write itself works (confirmed: the file
+  appears with the chosen key).
+- **A `FullscreenVideo`-only keymap binding did nothing while a PVR channel
+  was genuinely playing full-screen** — not even a `kodi.log` trace of
+  `RunScript` firing (ruling out a script-side error; the keypress itself
+  wasn't reaching the binding). `keymap.render_keymap_xml` now writes the
+  same binding under **both** `FullscreenVideo` and `FullscreenLiveTV`,
+  since some Kodi versions/skins still route live TV playback through the
+  legacy `FullscreenLiveTV` window context. **Not yet re-verified** whether
+  this actually fixes it — if `FullscreenLiveTV` also does nothing, the
+  wiring assumption (`RunScript(plugin.video.libtv)` resolving via the
+  `xbmc.python.script` extension) itself needs re-examining next, e.g. by
+  trying an explicit path
+  (`RunScript(special://home/addons/plugin.video.libtv/context.py)`)
+  instead of the bare add-on id. See `docs/live-testing.md` §5a.
 
 ## Known gaps (as of 2026-07)
 

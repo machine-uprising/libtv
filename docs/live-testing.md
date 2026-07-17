@@ -271,8 +271,22 @@ to set this up, both producing the same file:
             <g>RunScript(plugin.video.libtv)</g>
         </keyboard>
     </FullscreenVideo>
+    <FullscreenLiveTV>
+        <keyboard>
+            <g>RunScript(plugin.video.libtv)</g>
+        </keyboard>
+    </FullscreenLiveTV>
 </keymap>
 ```
+
+**Live-verified finding**: a `FullscreenVideo`-only binding produced
+**zero** effect while a PVR channel was genuinely playing full-screen — not
+even a trace in `kodi.log` of `RunScript` firing. Binding the same key under
+`FullscreenLiveTV` too (as above) is the fix — some Kodi versions/skins
+still route live TV playback through that legacy window context rather
+than `FullscreenVideo`. `keymap.render_keymap_xml` now writes both sections;
+if you saved a hotkey before this fix, press **Save hotkey now** again to
+regenerate the file with both sections, then restart Kodi and retest.
 
 Either way, restart Kodi (keymaps are loaded at startup) and press the key
 while a LibTV channel is playing.

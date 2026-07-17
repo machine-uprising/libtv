@@ -419,16 +419,25 @@ Two ways to trigger it, both reaching the same `context.py`/`overlay.show()`:
   configured key name, validates it (must be a safe XML element name — a
   bare Kodi key tag like `g` or `f9`), and writes
   `special://profile/keymaps/libtv.xml` binding that key to
-  `RunScript(plugin.video.libtv)` in the `FullscreenVideo` window — the
-  file always contains exactly this one binding, so it's safe to
-  regenerate on every save. An empty key removes the file instead of
-  writing an unusable one. Kodi only loads keymaps at startup, so every
-  notification this emits says a restart is required.
-- **Not yet live-verified** (§11): whether the keymap/`RunScript` trigger
-  works reliably, whether `special://profile/keymaps/` is really where Kodi
-  reads user keymap overrides from, and whether rendering a `WindowDialog`
-  over an actively playing **PVR** stream specifically (rather than a
-  regular library video) behaves as expected all remain to be confirmed.
+  `RunScript(plugin.video.libtv)` in **both** the `FullscreenVideo` and
+  `FullscreenLiveTV` windows — the file always contains exactly this one
+  binding (duplicated across both sections), so it's safe to regenerate on
+  every save. An empty key removes the file instead of writing an unusable
+  one. Kodi only loads keymaps at startup, so every notification this
+  emits says a restart is required.
+- **Live-verified finding**: a `FullscreenVideo`-only binding produced
+  **zero** effect while a PVR channel was genuinely playing full-screen —
+  not even a `kodi.log` trace of `RunScript` firing, ruling out a script
+  error and pointing at the window-context scoping itself. Binding
+  `FullscreenLiveTV` too (now the default in `render_keymap_xml`) is the
+  fix: some Kodi versions/skins still route live TV playback through that
+  legacy window context rather than `FullscreenVideo`.
+- **Not yet live-verified** (§11): whether the dual-context keymap binding
+  actually fixes the trigger, whether `special://profile/keymaps/` is
+  really where Kodi reads user keymap overrides from, and whether
+  rendering a `WindowDialog` over an actively playing **PVR** stream
+  specifically (rather than a regular library video) behaves as expected
+  all remain to be confirmed.
 
 ## 7. Background service and PVR refresh
 
