@@ -23,10 +23,11 @@ from libtv import generator, schedule
 
 _PLAY_URL = "plugin://plugin.video.libtv/?action=play&channel={0}"
 
-# Kodi action ids. kodistubs/tests.conftest's fake xbmcgui don't expose the
-# named xbmcgui.ACTION_* constants, so these are hardcoded pending live
-# verification against a real interpreter (see docs/live-testing.md) —
-# switch to the named constants once confirmed.
+# Confirmed against the real xbmcgui module (Kodistubs 21/Omega): these
+# match xbmcgui.ACTION_SELECT_ITEM/ACTION_MOUSE_LEFT_CLICK/
+# ACTION_PREVIOUS_MENU/ACTION_NAV_BACK exactly. tests.conftest's fake
+# xbmcgui doesn't define the named constants, so use the numeric values
+# directly rather than depending on the fake growing them.
 _ACTION_SELECT_ITEM = 7
 _ACTION_MOUSE_LEFT_CLICK = 100
 _ACTION_PREVIOUS_MENU = 10
@@ -50,7 +51,12 @@ class _EpgOverlay(xbmcgui.WindowDialog):
         # rows: [(channel_id, name, current_prog_or_None, next_prog_or_None), ...]
         self._channel_ids = [row[0] for row in rows]
         self.selected_channel = None
-        self._list = xbmcgui.ControlList(60, 60, 1200, 600, itemHeight=60)
+        # Kodi's real ControlList.__init__ takes underscore-prefixed keyword
+        # names (_itemHeight, _space, ...) for everything past selectedColor
+        # — the bare "itemHeight" from the API docs' prose raises TypeError
+        # at runtime (confirmed live on Omega/Windows; kodistubs matches the
+        # real signature here, the docstring text does not).
+        self._list = xbmcgui.ControlList(60, 60, 1200, 600, _itemHeight=60)
         items = []
         for _, name, current, upcoming in rows:
             label, label2 = _row_label(name, current, upcoming)

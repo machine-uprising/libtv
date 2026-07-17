@@ -246,15 +246,15 @@ the `c` key showed it (`c` instead opened Kodi's own built-in channel/guide
 overlay). The extension's XML is schema-valid; root cause is unconfirmed
 (possibly skin- or remote-specific). **Do not rely on this trigger.**
 
-**Trigger 2 — `RunScript(plugin.video.libtv)` via a keymap (use this one):**
-added because trigger 1 didn't surface. Add a keymap so any key you like
-calls the overlay directly, bypassing the context menu entirely. Two ways
-to set this up, both producing the same file:
+**Trigger 2 — `RunScript(plugin.video.libtv)` via a keymap (confirmed
+working):** added because trigger 1 didn't surface. Add a keymap so any key
+you like calls the overlay directly, bypassing the context menu entirely.
+Two ways to set this up, both producing the same file:
 
-- **Via settings (use this — not yet live-verified, so also test it):** open
-  LibTV's settings → "Guide & playback" → set **Hotkey** to a Kodi key name
-  (default `g`; check your skin/remote's existing keymap first so you don't
-  shadow something already bound), then press **Save hotkey now**
+- **Via settings (use this — confirmed working):** open LibTV's settings →
+  "Guide & playback" → set **Hotkey** to a Kodi key name (default `g`; check
+  your skin/remote's existing keymap first so you don't shadow something
+  already bound), then press **Save hotkey now**
   (`keymap.apply_from_settings`). Confirm a notification says the hotkey was
   saved, and that `special://profile/keymaps/libtv.xml` (Windows:
   `%APPDATA%\Kodi\userdata\keymaps\libtv.xml`) now exists with content
@@ -290,6 +290,17 @@ regenerate the file with both sections, then restart Kodi and retest.
 
 Either way, restart Kodi (keymaps are loaded at startup) and press the key
 while a LibTV channel is playing.
+
+**Confirmed live**: with the dual-context keymap, pressing the bound key
+during actual PVR playback did invoke `RunScript(plugin.video.libtv)` →
+`context.py` → `overlay.show()` — proven by a `kodi.log` traceback
+originating inside `overlay.py` itself. That traceback was a real bug,
+now fixed: `xbmcgui.ControlList(..., itemHeight=60)` raised `TypeError`
+because Kodi's actual keyword name is `_itemHeight` (see `CLAUDE.md`'s
+hard-constraints note). **The overlay's actual rendering/behavior — list
+display, navigation, tune-on-select — has not yet been checked**, since
+construction was crashing before any of that could happen. That's the
+next thing to verify.
 
 Checklist, using whichever trigger you're testing:
 

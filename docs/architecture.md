@@ -432,12 +432,19 @@ Two ways to trigger it, both reaching the same `context.py`/`overlay.show()`:
   `FullscreenLiveTV` too (now the default in `render_keymap_xml`) is the
   fix: some Kodi versions/skins still route live TV playback through that
   legacy window context rather than `FullscreenVideo`.
-- **Not yet live-verified** (§11): whether the dual-context keymap binding
-  actually fixes the trigger, whether `special://profile/keymaps/` is
-  really where Kodi reads user keymap overrides from, and whether
-  rendering a `WindowDialog` over an actively playing **PVR** stream
-  specifically (rather than a regular library video) behaves as expected
-  all remain to be confirmed.
+- **Confirmed live**: the dual-context keymap fix works — after re-saving
+  the hotkey and restarting, the bound key fired `RunScript(plugin.video.libtv)`
+  → `context.py` → `overlay.show()` during actual PVR playback (proven by a
+  traceback originating inside `overlay.py` itself in `kodi.log`), so
+  `special://profile/keymaps/` is confirmed as the right write location and
+  the `xbmc.python.script` wiring is confirmed to work.
+- That run then hit a real bug — `xbmcgui.ControlList(..., itemHeight=60)`
+  raised `TypeError` (Kodi's actual keyword name is `_itemHeight`; see
+  CLAUDE.md's hard-constraints note) — now fixed. **Not yet live-verified**
+  (§11): whether the overlay actually renders/behaves correctly (list
+  display, focus/navigation, tune-on-select) now that construction no
+  longer crashes, drawn over an actively playing **PVR** stream
+  specifically.
 
 ## 7. Background service and PVR refresh
 
@@ -541,15 +548,19 @@ default in `tests/conftest.py` `SETTINGS`.
 - The in-playback EPG overlay (§6a): the `kodi.context.item` trigger is
   **confirmed not to work** live (schema-valid, but the menu entry did not
   appear via either right-click or the `c` key on the tested setup; root
-  cause unknown). Three things added in response are **not yet
-  live-verified**: the `xbmc.python.script`/`RunScript(plugin.video.libtv)`
-  keymap trigger itself, the settings-driven write of
-  `special://profile/keymaps/libtv.xml` (`keymap.apply_from_settings`), and
-  whether a code-only `WindowDialog` drawn over an actively playing **PVR**
-  stream behaves the same as it would over a regular video (every other
-  PVR-specific surprise in this project — `StartOffset` ignored, resolver
-  script termination on channel change — came from PVR streams differing
-  from regular playback). See `docs/live-testing.md` for the checklist.
+  cause unknown). The `xbmc.python.script`/`RunScript(plugin.video.libtv)`
+  keymap trigger (with the `FullscreenLiveTV` fix) and the settings-driven
+  write of `special://profile/keymaps/libtv.xml`
+  (`keymap.apply_from_settings`) are now **confirmed working** live. What's
+  still open: whether a code-only `WindowDialog` drawn over an actively
+  playing **PVR** stream renders and behaves correctly — list display,
+  focus/navigation, tune-on-select, close-without-selecting — now that a
+  real construction bug (`ControlList`'s `itemHeight` vs. `_itemHeight`
+  keyword, see `CLAUDE.md`) is fixed (every other PVR-specific surprise in
+  this project — `StartOffset` ignored, resolver script termination on
+  channel change — came from PVR streams differing from regular playback,
+  so this is still worth a dedicated check). See `docs/live-testing.md` for
+  the checklist.
 - Possible future channel sources: per-show channels, smart-playlist-backed
   channels, tag filters, decade-based autotune.
 - `star-rating`/`new`/`xmltv_ns` XMLTV fields (§5) depend on the library

@@ -192,6 +192,16 @@ encouraged for diagnosis.
   `<extension>` — `kodi-addon-checker` rejects both the unwrapped and
   extension-level-`library` forms (verified against its bundled XSD,
   `matrix_contextitem.xsd`/`jarvis_contextitem.xsd`).
+- **`xbmcgui.ControlList`'s real keyword arguments are underscore-prefixed**
+  (`_itemHeight`, `_space`, `_imageWidth`, ... — everything past
+  `selectedColor`) even though the API docs' prose names them without the
+  underscore (`itemHeight`, etc.) — confirmed live on Omega/Windows:
+  `ControlList(x, y, w, h, itemHeight=60)` raises
+  `TypeError: 'itemHeight' is an invalid keyword argument for this
+  function`; `kodistubs`' actual `__init__` signature (not its docstring)
+  has the correct underscore-prefixed names and would have caught this —
+  check the stub's *signature*, not its prose, when a Kodi API call's
+  keyword arguments are ambiguous.
 - The add-on profile directory does not exist until created — `generator.profile_dir()`
   handles `xbmcvfs.mkdirs`; write files only through it.
 - `addon.xml` changes must pass `kodi-addon-checker`. Valid plugin extension
@@ -292,13 +302,21 @@ see `docs/live-testing.md` for the checklist.
   wasn't reaching the binding). `keymap.render_keymap_xml` now writes the
   same binding under **both** `FullscreenVideo` and `FullscreenLiveTV`,
   since some Kodi versions/skins still route live TV playback through the
-  legacy `FullscreenLiveTV` window context. **Not yet re-verified** whether
-  this actually fixes it — if `FullscreenLiveTV` also does nothing, the
-  wiring assumption (`RunScript(plugin.video.libtv)` resolving via the
-  `xbmc.python.script` extension) itself needs re-examining next, e.g. by
-  trying an explicit path
-  (`RunScript(special://home/addons/plugin.video.libtv/context.py)`)
-  instead of the bare add-on id. See `docs/live-testing.md` §5a.
+  legacy `FullscreenLiveTV` window context.
+- **Confirmed: the dual-context keymap fix works** — after re-saving the
+  hotkey and restarting, pressing the bound key during PVR playback
+  successfully invoked `RunScript(plugin.video.libtv)` → `context.py` →
+  `overlay.show()` (proven by a Python traceback from *inside*
+  `overlay.py` appearing in `kodi.log`, which only happens once the script
+  actually runs). So both the `xbmc.python.script`/`RunScript` wiring and
+  the `FullscreenLiveTV` addition are now live-verified as far as
+  triggering the overlay goes.
+- That run then hit a real bug: `xbmcgui.ControlList(..., itemHeight=60)`
+  raised `TypeError` (see the `ControlList` keyword-argument finding
+  above) — fixed by using `_itemHeight` instead. The overlay's actual
+  rendering (does the list display correctly, can you navigate/select,
+  does tuning from it work) still needs a fresh live pass now that
+  construction no longer crashes. See `docs/live-testing.md` §5a.
 
 ## Known gaps (as of 2026-07)
 
@@ -321,8 +339,9 @@ see `docs/live-testing.md` for the checklist.
   `ControlList` rendering cannot be faked meaningfully. The
   `kodi.context.item` trigger is **confirmed not to work** (see "Live-
   verified findings" above); the `RunScript(plugin.video.libtv)`/keymap
-  trigger added to work around that (including the settings-driven write of
-  `special://profile/keymaps/libtv.xml`), and whether a code-only overlay
-  window drawn over an actively playing **PVR** stream (as opposed to a
-  regular video) behaves as expected, are all still **not yet
-  live-verified**. See `docs/live-testing.md` §5a.
+  trigger (with the `FullscreenLiveTV` fix) is now **confirmed to fire**.
+  Still open: whether the overlay actually **renders and behaves
+  correctly** once construction no longer crashes (list displays, focus/
+  navigation works, selecting a row tunes the channel, closing without
+  selecting leaves playback alone) drawn over an actively playing **PVR**
+  stream specifically. See `docs/live-testing.md` §5a.
