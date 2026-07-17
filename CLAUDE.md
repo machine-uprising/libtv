@@ -74,6 +74,11 @@ work through its checklist — it maps which document owns what.
     `RunScript` trigger doesn't require hand-editing a keymap file
 - `resources/settings.xml` — new-format (`version="1"`) settings; labels are
   msgid numbers resolved via `resources/language/resource.language.en_gb/strings.po`
+- `resources/media/overlay_bg.png` — the only bundled runtime image asset:
+  a tiny solid semi-transparent PNG stretched behind the EPG overlay's
+  list so its text is legible over playing video. Explicitly un-ignored in
+  `.gitignore` (see packaging gotchas) since this directory's PNGs/JPGs are
+  otherwise excluded.
 - `tests/conftest.py` — hand-rolled fake `xbmc*` modules that make the add-on
   importable outside Kodi
 - `docs/` — `architecture.md` (canonical design), `live-testing.md`
@@ -133,6 +138,14 @@ trees and verifies the built zip contains the key add-on files.
   file" on addon.xml) until Kodi restarts. The build names zips
   `<id>-<version>.zip` so releases land on fresh paths; when iterating on
   the same version, restart Kodi between install attempts.
+- `resources/media/*.png`/`*.jpg` are gitignored (intended for
+  future/dev-generated assets, not committed ones) — a genuine bundled
+  runtime asset placed there (e.g. `overlay.py`'s background image) is
+  invisible to `git add` and therefore silently **absent from the zip**
+  unless explicitly un-ignored (`!resources/media/<file>.png` in
+  `.gitignore`). Any new committed media file needs the same treatment, or
+  it'll ship with an empty add-on and fail confusingly at runtime instead
+  of at build time.
 
 ## The live Kodi is production — never modify it in place
 
@@ -323,10 +336,22 @@ see `docs/live-testing.md` for the checklist.
   crash, no focus, no error thrown into Python — only a GUI-log line).
   **Fix**: move `setFocus()` into an `onInit()` override, which Kodi calls
   once the window has actually been initialized/shown — the documented
-  place to set initial focus on a hand-built `Window`/`WindowDialog`. The
-  overlay's actual rendering (list display, navigation/select, tuning)
-  still needs a fresh live pass now that focus is set correctly. See
-  `docs/live-testing.md` §5a.
+  place to set initial focus on a hand-built `Window`/`WindowDialog`.
+- **Third live pass: the window opened and blocked in `doModal()` (log
+  showed `overlay showing N channel row(s)` and then nothing further) but
+  was completely invisible** — pressing Esc once did nothing, pressing it
+  again brought up Kodi's own OSD with the video still playing underneath,
+  confirming the overlay *was* open and closed on that first Esc, it just
+  never rendered anything visible. Root cause: a code-only `WindowDialog`
+  draws no background of its own, and the `ControlList` had no explicit
+  `textColor`/`selectedColor`, so it likely wasn't drawing legible content
+  either. **Fix**: added `resources/media/overlay_bg.png` (a small solid
+  semi-transparent PNG, generated with pure Python — no Pillow needed —
+  since the repo has no image assets yet), drawn via `xbmcgui.ControlImage`
+  behind the list, plus explicit `textColor`/`selectedColor` on the
+  `ControlList` so rows and the focused row are legible regardless of
+  skin/video content behind them. Not yet live-verified whether this
+  actually makes the overlay visible — see `docs/live-testing.md` §5a.
 
 ## Known gaps (as of 2026-07)
 

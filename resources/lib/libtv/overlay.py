@@ -14,14 +14,29 @@ plugin.run.
 """
 from __future__ import annotations
 
+import os
 import time
 
 import xbmc
+import xbmcaddon
 import xbmcgui
+import xbmcvfs
 
 from libtv import generator, schedule
 
 _PLAY_URL = "plugin://plugin.video.libtv/?action=play&channel={0}"
+
+# A code-only WindowDialog draws nothing behind its controls — over a
+# playing video, an unstyled ControlList was confirmed live to be
+# completely invisible (doModal() blocked and the log showed it running,
+# but nothing was ever seen on screen; Esc still closed it once pressed
+# twice). This bundled background plus explicit text colors below fix
+# that; it must stay tracked despite the repo's generic
+# `resources/media/*.png` ignore rule (see .gitignore's exception).
+_BG_IMAGE = os.path.join(
+    xbmcvfs.translatePath(xbmcaddon.Addon().getAddonInfo("path")),
+    "resources", "media", "overlay_bg.png",
+)
 
 # Confirmed against the real xbmcgui module (Kodistubs 21/Omega): these
 # match xbmcgui.ACTION_SELECT_ITEM/ACTION_MOUSE_LEFT_CLICK/
@@ -51,12 +66,22 @@ class _EpgOverlay(xbmcgui.WindowDialog):
         # rows: [(channel_id, name, current_prog_or_None, next_prog_or_None), ...]
         self._channel_ids = [row[0] for row in rows]
         self.selected_channel = None
+        # Background first so the list draws on top of it, not behind.
+        self._background = xbmcgui.ControlImage(40, 40, 1240, 640, _BG_IMAGE)
+        self.addControl(self._background)
         # Kodi's real ControlList.__init__ takes underscore-prefixed keyword
         # names (_itemHeight, _space, ...) for everything past selectedColor
         # — the bare "itemHeight" from the API docs' prose raises TypeError
         # at runtime (confirmed live on Omega/Windows; kodistubs matches the
-        # real signature here, the docstring text does not).
-        self._list = xbmcgui.ControlList(60, 60, 1200, 600, _itemHeight=60)
+        # real signature here, the docstring text does not). textColor and
+        # selectedColor are explicit (not left to a possibly-invisible
+        # skin default) so rows are legible and the focused one is visibly
+        # distinct without needing separate focus-texture assets.
+        self._list = xbmcgui.ControlList(
+            60, 60, 1200, 600,
+            textColor="0xFFFFFFFF", selectedColor="0xFFFFD700",
+            _itemHeight=60,
+        )
         items = []
         for _, name, current, upcoming in rows:
             label, label2 = _row_label(name, current, upcoming)

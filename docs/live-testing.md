@@ -301,10 +301,21 @@ hard-constraints note). The next attempt hit a second bug: `Control N in
 window M has been asked to focus, but it can't` in `kodi.log` (no
 traceback) — `setFocus()` was called from `__init__`, before the window
 was ever shown via `doModal()`, so the focus request silently failed.
-Fixed by moving `setFocus()` into an `onInit()` override. **The overlay's
-actual rendering/behavior — list display, navigation, tune-on-select — has
-still not yet been checked**, since focus was never actually landing on
-the list before now. That's the next thing to verify.
+Fixed by moving `setFocus()` into an `onInit()` override. The *next* live
+pass confirmed the window opened and blocked in `doModal()` exactly as
+expected (log showed `overlay showing N channel row(s)`, then nothing
+further until closed) — **but rendered nothing visible at all**: pressing
+Esc once did nothing, pressing it again brought up Kodi's own OSD with the
+video still playing underneath, meaning the overlay had been open the
+whole time and closed on that first Esc, just invisibly. Root cause: a
+code-only `WindowDialog` has no background of its own, and the
+`ControlList` had no explicit text colors. **Fix**: added
+`resources/media/overlay_bg.png` (small solid semi-transparent PNG, the
+add-on's only bundled image asset) drawn behind the list via
+`xbmcgui.ControlImage`, plus explicit `textColor`/`selectedColor` on the
+list. **The overlay's actual rendering/behavior — is it now visible, does
+navigation work, does selecting a row tune the channel — has still not
+been checked.** That's the next thing to verify.
 
 Checklist, using whichever trigger you're testing:
 

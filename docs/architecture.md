@@ -398,7 +398,15 @@ Two ways to trigger it, both reaching the same `context.py`/`overlay.show()`:
 - **Rendering**: `overlay._EpgOverlay` is a code-only `xbmcgui.WindowDialog`
   (no skin XML) with one `ControlList` populated from schedule rows — this
   is what makes it draw over any skin. It is the first custom-rendered
-  window in the add-on.
+  window in the add-on. Because a code-only `WindowDialog` has no
+  background of its own, an `xbmcgui.ControlImage` referencing
+  `resources/media/overlay_bg.png` (a small solid semi-transparent PNG —
+  the add-on's only bundled image asset) is drawn behind the list, and the
+  list's `textColor`/`selectedColor` are set explicitly, so rows and the
+  focused one stay legible over whatever video is playing behind the
+  overlay (**live-verified finding**: without this, the window opened and
+  blocked in `doModal()` exactly as expected, but rendered nothing visible
+  at all — see §11).
 - **Data**: strictly **read-only** against the persisted `schedule.json` —
   `generator.load_schedule()` plus a new pure lookup,
   `schedule.find_now_and_next(data, channel_id, now_epoch)`, returning
@@ -562,13 +570,18 @@ default in `tests/conftest.py` `SETTINGS`.
   (`keymap.apply_from_settings`) are now **confirmed working** live. What's
   still open: whether a code-only `WindowDialog` drawn over an actively
   playing **PVR** stream renders and behaves correctly — list display,
-  focus/navigation, tune-on-select, close-without-selecting — now that a
-  real construction bug (`ControlList`'s `itemHeight` vs. `_itemHeight`
-  keyword, see `CLAUDE.md`) is fixed (every other PVR-specific surprise in
-  this project — `StartOffset` ignored, resolver script termination on
-  channel change — came from PVR streams differing from regular playback,
-  so this is still worth a dedicated check). See `docs/live-testing.md` for
-  the checklist.
+  focus/navigation, tune-on-select, close-without-selecting — now that two
+  real bugs are fixed: a construction crash (`ControlList`'s `itemHeight`
+  vs. `_itemHeight` keyword) and a completely invisible window (a
+  code-only `WindowDialog` has no background of its own; opened and
+  blocked in `doModal()` correctly, per the log, but rendered nothing on
+  screen — fixed by drawing `resources/media/overlay_bg.png` behind the
+  list and setting explicit `textColor`/`selectedColor`, see `CLAUDE.md`'s
+  live-verified findings). Every other PVR-specific surprise in this
+  project — `StartOffset` ignored, resolver script termination on channel
+  change — came from PVR streams differing from regular playback, so this
+  is still worth a dedicated check. See `docs/live-testing.md` for the
+  checklist.
 - Possible future channel sources: per-show channels, smart-playlist-backed
   channels, tag filters, decade-based autotune.
 - `star-rating`/`new`/`xmltv_ns` XMLTV fields (§5) depend on the library

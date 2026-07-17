@@ -232,6 +232,9 @@ Thumbs.db
 # Generated files (but keep them in .gitignore for dev)
 resources/media/*.png
 resources/media/*.jpg
+# Exception: a committed runtime asset (EPG overlay background), not a
+# generated/dev artifact — must ship in the zip, so it must be tracked.
+!resources/media/overlay_bg.png
 
 .devcontainer/devcontainer-lock.json
 
