@@ -297,10 +297,14 @@ during actual PVR playback did invoke `RunScript(plugin.video.libtv)` →
 originating inside `overlay.py` itself. That traceback was a real bug,
 now fixed: `xbmcgui.ControlList(..., itemHeight=60)` raised `TypeError`
 because Kodi's actual keyword name is `_itemHeight` (see `CLAUDE.md`'s
-hard-constraints note). **The overlay's actual rendering/behavior — list
-display, navigation, tune-on-select — has not yet been checked**, since
-construction was crashing before any of that could happen. That's the
-next thing to verify.
+hard-constraints note). The next attempt hit a second bug: `Control N in
+window M has been asked to focus, but it can't` in `kodi.log` (no
+traceback) — `setFocus()` was called from `__init__`, before the window
+was ever shown via `doModal()`, so the focus request silently failed.
+Fixed by moving `setFocus()` into an `onInit()` override. **The overlay's
+actual rendering/behavior — list display, navigation, tune-on-select — has
+still not yet been checked**, since focus was never actually landing on
+the list before now. That's the next thing to verify.
 
 Checklist, using whichever trigger you're testing:
 

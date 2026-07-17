@@ -440,11 +440,19 @@ Two ways to trigger it, both reaching the same `context.py`/`overlay.show()`:
   the `xbmc.python.script` wiring is confirmed to work.
 - That run then hit a real bug — `xbmcgui.ControlList(..., itemHeight=60)`
   raised `TypeError` (Kodi's actual keyword name is `_itemHeight`; see
-  CLAUDE.md's hard-constraints note) — now fixed. **Not yet live-verified**
-  (§11): whether the overlay actually renders/behaves correctly (list
-  display, focus/navigation, tune-on-select) now that construction no
-  longer crashes, drawn over an actively playing **PVR** stream
-  specifically.
+  CLAUDE.md's hard-constraints note) — now fixed.
+- The next live pass hit a second bug: `Control N in window M has been
+  asked to focus, but it can't` in `kodi.log` (no traceback). Cause:
+  `setFocus()` was called from `_EpgOverlay.__init__`, before `doModal()`
+  had shown the window — Kodi can't focus a control on a window that isn't
+  part of the active window stack yet, so the call fails silently
+  (nothing thrown, just a GUI-log line and no focused control). Fixed by
+  moving `setFocus()` into an `onInit()` override, the documented hook
+  Kodi calls once a hand-built `Window`/`WindowDialog` has actually been
+  shown. **Not yet live-verified** (§11): whether the overlay actually
+  renders/behaves correctly (list display, focus/navigation, tune-on-select)
+  now that both construction and focus-setting are fixed, drawn over an
+  actively playing **PVR** stream specifically.
 
 ## 7. Background service and PVR refresh
 

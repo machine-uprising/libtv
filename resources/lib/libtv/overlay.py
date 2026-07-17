@@ -63,6 +63,15 @@ class _EpgOverlay(xbmcgui.WindowDialog):
             items.append(xbmcgui.ListItem(label=label, label2=label2))
         self._list.addItems(items)
         self.addControl(self._list)
+
+    def onInit(self):
+        # Kodi can't grant focus to a control before the window itself is
+        # actually shown — calling setFocus() from __init__ (i.e. before
+        # doModal() has shown this window) logs "Control N in window M has
+        # been asked to focus, but it can't" and silently leaves nothing
+        # focused (confirmed live on Omega/Windows). onInit() fires once
+        # Kodi has finished initializing/showing the window, which is the
+        # documented place to set initial focus.
         self.setFocus(self._list)
 
     def _select_focused(self):

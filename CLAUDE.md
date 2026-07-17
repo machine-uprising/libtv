@@ -313,10 +313,20 @@ see `docs/live-testing.md` for the checklist.
   triggering the overlay goes.
 - That run then hit a real bug: `xbmcgui.ControlList(..., itemHeight=60)`
   raised `TypeError` (see the `ControlList` keyword-argument finding
-  above) — fixed by using `_itemHeight` instead. The overlay's actual
-  rendering (does the list display correctly, can you navigate/select,
-  does tuning from it work) still needs a fresh live pass now that
-  construction no longer crashes. See `docs/live-testing.md` §5a.
+  above) — fixed by using `_itemHeight` instead.
+- **Next live pass hit another real bug**: `Control N in window M has been
+  asked to focus, but it can't` in `kodi.log`, no traceback. Cause:
+  `self.setFocus(self._list)` was called from `_EpgOverlay.__init__` —
+  i.e. before `doModal()` had ever shown the window. Kodi can't grant
+  focus to a control on a window that isn't part of the active/visible
+  window stack yet, so the call silently fails (window not shown = no
+  crash, no focus, no error thrown into Python — only a GUI-log line).
+  **Fix**: move `setFocus()` into an `onInit()` override, which Kodi calls
+  once the window has actually been initialized/shown — the documented
+  place to set initial focus on a hand-built `Window`/`WindowDialog`. The
+  overlay's actual rendering (list display, navigation/select, tuning)
+  still needs a fresh live pass now that focus is set correctly. See
+  `docs/live-testing.md` §5a.
 
 ## Known gaps (as of 2026-07)
 
