@@ -30,6 +30,7 @@ SETTINGS = {
     "regen_interval_hours": "6",
     "join_in_progress": "true",
     "refresh_pvr": "true",
+    "overlay_hotkey_key": "g",
 }
 
 # Calls recorded by fakes, for assertions: list of (module.func, args) tuples.
@@ -227,6 +228,7 @@ def _make_xbmcgui() -> types.ModuleType:
     mod.ListItem = _ListItem
     mod.Window = _Window
     mod.NOTIFICATION_INFO = "info"
+    mod.NOTIFICATION_WARNING = "warning"
     mod.INPUT_ALPHANUM = 0
     mod.INPUT_NUMERIC = 1
     return mod
@@ -265,7 +267,7 @@ import pytest  # noqa: E402  (fakes must be installed before anything imports xb
 @pytest.fixture(autouse=True)
 def _reset_kodi_fakes():
     yield
-    from libtv import generator
+    from libtv import generator, keymap
 
     generator.clear_pending_seek()
     for path in (
@@ -274,6 +276,7 @@ def _reset_kodi_fakes():
         generator.schedule_path(),
         os.path.join(generator.profile_dir(), generator.M3U_NAME),
         os.path.join(generator.profile_dir(), generator.XMLTV_NAME),
+        keymap.path(),
     ):
         try:
             os.remove(path)

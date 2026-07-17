@@ -56,11 +56,18 @@ from the same schedule, so the guide and playback always agree.
   your library metadata into the XMLTV guide when available, alongside the
   plot, genre, and episode numbering (both `SxxEyy` and the zero-based
   `xmltv_ns` form, for skins that read one or the other).
-- **In-playback EPG overlay**: while a channel is playing, a "LibTV guide
-  (Now/Next)" entry in the video context menu opens a scrollable list of
-  every channel's current and next programme, and lets you jump straight to
-  one — without leaving playback, and regardless of whether your skin
-  supports Kodi's own PVR Guide window with video playing behind it.
+- **In-playback EPG overlay**: while a channel is playing, opens a scrollable
+  list of every channel's current and next programme and lets you jump
+  straight to one — without leaving playback, and regardless of whether your
+  skin supports Kodi's own PVR Guide window with video playing behind it.
+  Bind it to a key of your choice from **Settings → Guide & playback**: set
+  **Hotkey** to any Kodi key name (default `g`), then press
+  **Save hotkey now** — LibTV writes the keymap file for you
+  (`special://profile/keymaps/libtv.xml`); clear the field and save again to
+  remove the binding. Restart Kodi afterwards (keymaps load at startup).
+  There's also a video context-menu entry ("LibTV guide (Now/Next)"), but it
+  did not appear in testing — the hotkey is the trigger to actually use; see
+  `docs/live-testing.md` §5a.
 - After every rebuild LibTV automatically reloads IPTV Simple (unless
   something is playing); if a refresh is skipped because something was
   playing, it retries on its own shortly after playback stops, instead of
@@ -166,9 +173,12 @@ episode-num systems), the automatic post-rebuild guide refresh (including
 its self-healing retry), and a resolver loop guard against rapid repeated
 schedule misses are implemented and unit-tested but still awaiting live
 verification in a real Kodi (see `docs/live-testing.md`). As of v0.7.0, an
-in-playback EPG overlay (a "LibTV guide (Now/Next)" video context-menu
-entry) is implemented and passes `kodi-addon-checker`, but is entirely
-unverified in a real Kodi — both the context-menu trigger itself and
-whether its code-only overlay window behaves correctly drawn over an
-actively playing PVR stream. See `CLAUDE.md` for development constraints
-and known gaps.
+in-playback EPG overlay is implemented and passes `kodi-addon-checker`. Its
+video context-menu trigger was tested live and **confirmed not to work**
+(the entry never appeared); v0.7.1 adds a keymap-bindable
+`RunScript(plugin.video.libtv)` trigger in response, and v0.7.2 adds a
+"Hotkey" setting + "Save hotkey now" button so that keymap is written for
+you instead of hand-edited. Both the `RunScript` trigger and the
+settings-driven write, along with whether the overlay window behaves
+correctly drawn over an actively playing PVR stream, are not yet themselves
+live-verified. See `CLAUDE.md` for development constraints and known gaps.

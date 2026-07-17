@@ -68,6 +68,18 @@
                     <control type="button" format="action"/>
                 </setting>
             </group>
+            <group id="3" label="32114">
+                <setting id="overlay_hotkey_key" type="string" label="32115" help="32117">
+                    <level>0</level>
+                    <default>g</default>
+                    <control type="edit" format="string"/>
+                </setting>
+                <setting id="overlay_hotkey_apply" type="action" label="32116" help="">
+                    <level>0</level>
+                    <data>RunPlugin(plugin://plugin.video.libtv/?action=apply_keymap)</data>
+                    <control type="button" format="action"/>
+                </setting>
+            </group>
         </category>
     </section>
 </settings>

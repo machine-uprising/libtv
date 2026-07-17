@@ -234,16 +234,60 @@ rebuilds — see the packaging gotchas in `CLAUDE.md`.) Then in Kodi:
 
 ## 5a. In-playback EPG overlay
 
-New in this release: a "LibTV guide (Now/Next)" entry in the video context
-menu while a channel is playing, opening a code-only overlay listing every
-channel's current/next programme (`docs/architecture.md` §6a). Neither the
-`kodi.context.item` trigger nor the `xbmcgui.WindowDialog` rendering can be
-unit-tested — this is the first verification pass for both.
+A code-only overlay listing every channel's current/next programme
+(`docs/architecture.md` §6a), reachable via `context.py` → `overlay.show()`.
+Neither trigger below nor the `xbmcgui.WindowDialog` rendering can be
+unit-tested.
 
-- **Context-menu entry appears** — while a LibTV channel is playing, open
-  the context menu (remote's context/menu button, or `c` on a keyboard) and
-  confirm **"LibTV guide (Now/Next)"** is listed. Confirm it does *not*
-  appear when nothing is playing.
+**Trigger 1 — `kodi.context.item` (confirmed NOT working):** a "LibTV guide
+(Now/Next)" video context-menu entry, visible only while playing. Live
+testing found this entry does not appear — neither a mouse right-click nor
+the `c` key showed it (`c` instead opened Kodi's own built-in channel/guide
+overlay). The extension's XML is schema-valid; root cause is unconfirmed
+(possibly skin- or remote-specific). **Do not rely on this trigger.**
+
+**Trigger 2 — `RunScript(plugin.video.libtv)` via a keymap (use this one):**
+added because trigger 1 didn't surface. Add a keymap so any key you like
+calls the overlay directly, bypassing the context menu entirely. Two ways
+to set this up, both producing the same file:
+
+- **Via settings (use this — not yet live-verified, so also test it):** open
+  LibTV's settings → "Guide & playback" → set **Hotkey** to a Kodi key name
+  (default `g`; check your skin/remote's existing keymap first so you don't
+  shadow something already bound), then press **Save hotkey now**
+  (`keymap.apply_from_settings`). Confirm a notification says the hotkey was
+  saved, and that `special://profile/keymaps/libtv.xml` (Windows:
+  `%APPDATA%\Kodi\userdata\keymaps\libtv.xml`) now exists with content
+  matching the manual snippet below. Clear the Hotkey field and save again
+  to confirm the file is removed.
+- **Manual fallback**, if you want to hand-verify the format or the settings
+  path isn't working: create `special://userdata/keymaps/libtv.xml` yourself
+  with:
+
+```xml
+<keymap>
+    <FullscreenVideo>
+        <keyboard>
+            <g>RunScript(plugin.video.libtv)</g>
+        </keyboard>
+    </FullscreenVideo>
+</keymap>
+```
+
+Either way, restart Kodi (keymaps are loaded at startup) and press the key
+while a LibTV channel is playing.
+
+Checklist, using whichever trigger you're testing:
+
+- **Settings write the keymap file correctly** — confirm the Hotkey
+  setting + "Save hotkey now" button actually produces
+  `special://profile/keymaps/libtv.xml` with the expected binding, and that
+  clearing the field + saving removes the file. This exercises real
+  `xbmcvfs`/filesystem behavior that unit tests only fake.
+- **Trigger opens the overlay** — confirm the chosen mechanism (keymap key,
+  or the context-menu entry if you're re-testing trigger 1 on a different
+  skin/remote) actually opens the Now/Next list while a LibTV channel is
+  playing, and does nothing/is absent when nothing is playing.
 - **Playback is undisturbed** — opening the overlay must not
   pause/stop/hiccup the underlying stream. Test against an actual **PVR
   IPTV Simple** channel specifically, not just a regular library video —

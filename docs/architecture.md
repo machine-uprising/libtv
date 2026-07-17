@@ -39,8 +39,8 @@ inputs for Kodi's native PVR stack and resolves streams on demand:
 
 | File | Role |
 | --- | --- |
-| `addon.xml` | Manifest. Three extension points: `xbmc.python.pluginsource` → `default.py`, `xbmc.service` → `service.py`, `kodi.context.item` → `context.py`. |
-| `default.py`, `service.py`, `context.py` | Thin entry shims (≤15 lines each, enforced by kodi-addon-checker). Add `resources/lib` to `sys.path` and delegate. `context.py` is invoked with Kodi's context-menu calling convention (no `plugin://` argv triple), not through `plugin.run`. |
+| `addon.xml` | Manifest. Four extension points: `xbmc.python.pluginsource` → `default.py`, `xbmc.service` → `service.py`, `xbmc.python.script` → `context.py` (makes `RunScript(plugin.video.libtv)` work from a keymap), `kodi.context.item` → `context.py` (unreliable in testing, §6a). |
+| `default.py`, `service.py`, `context.py` | Thin entry shims (≤15 lines each, enforced by kodi-addon-checker). Add `resources/lib` to `sys.path` and delegate. `context.py` is invoked either via `RunScript` or Kodi's context-menu calling convention — neither passes a `plugin://` argv triple, so it never goes through `plugin.run`. |
 | `resources/lib/libtv/schedule.py` | **Pure.** Schedule building and lookup. No Kodi imports. |
 | `resources/lib/libtv/writers.py` | **Pure.** Renders M3U and XMLTV strings from a schedule dict. |
 | `resources/lib/libtv/channels.py` | **Pure.** Channel-lineup configuration: `channels.json` load/save, default lineup, id allocation, reorder, JSON-RPC filter building (`build_filter`), and per-channel selection-order building (`build_sort`). |
@@ -50,6 +50,7 @@ inputs for Kodi's native PVR stack and resolves streams on demand:
 | `resources/lib/libtv/manage.py` | Dialog-driven channel management UI (add/rename/filter/order/reorder/delete) plus genre- and studio-based channel autotune (§3). |
 | `resources/lib/libtv/daemon.py` | Service loop (periodic regeneration, self-healing PVR-refresh retry) + `JoinInProgressPlayer` (the seek half of join-in-progress; also records observed durations). |
 | `resources/lib/libtv/overlay.py` | In-playback EPG overlay (§6a): a code-only `xbmcgui.WindowDialog` listing every channel's Now/Next, read-only against `schedule.json`. |
+| `resources/lib/libtv/keymap.py` | In-playback EPG overlay (§6a): pure key validation (`valid_key`) and keymap XML rendering (`render_keymap_xml`), plus `apply_from_settings()` which writes/removes `special://profile/keymaps/libtv.xml` from the "Hotkey"/"Save hotkey now" settings. |
 | `resources/settings.xml` + `resources/language/…/strings.po` | New-format settings; labels are msgids in the 32100 range. |
 
 ## 3. The channel lineup
@@ -369,18 +370,35 @@ changes, the file-based fallback can be deleted from `plugin.py` and
 
 ## 6a. In-playback EPG overlay
 
-While a channel is playing, a **"LibTV guide (Now/Next)"** entry in the video
-context menu (`kodi.context.item` extension, visible only when
-`Player.HasVideo`, → `context.py` → `overlay.show()`) opens a scrollable list
-of every channel with what's on now and what's next. It exists because
-Kodi's own PVR Guide window keeps the video playing behind it only on skins
-that support that PIP behavior (confirmed on Estuary; not guaranteed
-elsewhere) — this overlay is skin-independent by construction.
+While a channel is playing, `context.py` → `overlay.show()` opens a
+scrollable list of every channel with what's on now and what's next. It
+exists because Kodi's own PVR Guide window keeps the video playing behind it
+only on skins that support that PIP behavior (confirmed on Estuary; not
+guaranteed elsewhere) — this overlay is skin-independent by construction.
+
+Two ways to trigger it, both reaching the same `context.py`/`overlay.show()`:
+
+- **`kodi.context.item`** — a **"LibTV guide (Now/Next)"** entry in the video
+  context menu, visible only when `Player.HasVideo`. **Live-verified
+  finding: this did not appear in testing** (neither via a mouse right-click
+  nor the `c` key, which instead opened Kodi's own built-in channel/guide
+  overlay) — root cause unknown (schema is valid per `kodi-addon-checker`;
+  possibly a skin- or remote-specific context-menu binding issue). Left in
+  place since it's schema-valid and may work on other skins/setups, but is
+  **not** the reliable trigger.
+- **`xbmc.python.script`** (added in response to the above) — makes the
+  add-on directly invokable as `RunScript(plugin.video.libtv)` from any
+  keymap, independent of the context-menu mechanism entirely. This is the
+  trigger to actually rely on: bind it to a key of your choice via a
+  `special://userdata/keymaps/*.xml` keymap (see `docs/live-testing.md`
+  §5a for the exact snippet). `RunScript` resolves the add-on id through
+  this extension's `library="context.py"`, so no hardcoded filesystem path
+  is needed and it works the same across platforms.
 
 - **Rendering**: `overlay._EpgOverlay` is a code-only `xbmcgui.WindowDialog`
   (no skin XML) with one `ControlList` populated from schedule rows — this
   is what makes it draw over any skin. It is the first custom-rendered
-  window and the first `kodi.context.item` extension in the add-on.
+  window in the add-on.
 - **Data**: strictly **read-only** against the persisted `schedule.json` —
   `generator.load_schedule()` plus a new pure lookup,
   `schedule.find_now_and_next(data, channel_id, now_epoch)`, returning
@@ -393,12 +411,24 @@ elsewhere) — this overlay is skin-independent by construction.
 - **Tuning from the overlay**: selecting a row reuses the existing resolver
   — `xbmc.executebuiltin("PlayMedia(plugin://plugin.video.libtv/?action=play&channel=<id>)")`
   — no stream-resolution logic is duplicated.
-- **Not yet live-verified** (§11): the `kodi.context.item` extension schema
-  had no precedent in this repo (confirmed against `kodi-addon-checker`,
-  which requires the `<menu id="kodi.core.main">` wrapper and the `library`
-  attribute on `<item>`, not on `<extension>`), and rendering a
-  `WindowDialog` over an actively playing **PVR** stream specifically
-  (rather than a regular library video) has no precedent either.
+- **Setting up the keymap trigger without hand-editing files**:
+  `resources/lib/libtv/keymap.py` (**pure** key validation/XML rendering —
+  `valid_key`, `render_keymap_xml` — plus a thin Kodi-facing
+  `apply_from_settings()`) backs a "Hotkey" text setting +
+  "Save hotkey now" action button (§8). Pressing the button reads the
+  configured key name, validates it (must be a safe XML element name — a
+  bare Kodi key tag like `g` or `f9`), and writes
+  `special://profile/keymaps/libtv.xml` binding that key to
+  `RunScript(plugin.video.libtv)` in the `FullscreenVideo` window — the
+  file always contains exactly this one binding, so it's safe to
+  regenerate on every save. An empty key removes the file instead of
+  writing an unusable one. Kodi only loads keymaps at startup, so every
+  notification this emits says a restart is required.
+- **Not yet live-verified** (§11): whether the keymap/`RunScript` trigger
+  works reliably, whether `special://profile/keymaps/` is really where Kodi
+  reads user keymap overrides from, and whether rendering a `WindowDialog`
+  over an actively playing **PVR** stream specifically (rather than a
+  regular library video) behaves as expected all remain to be confirmed.
 
 ## 7. Background service and PVR refresh
 
@@ -448,6 +478,8 @@ transient.)
 | `autotune_channels` | action | — | `RunPlugin(…?action=autotune)` — genre-based channel autotune (§3). |
 | `autotune_studio_channels` | action | — | `RunPlugin(…?action=autotune_studio)` — studio-based channel autotune (§3). |
 | `regenerate_now` | action | — | `RunPlugin(…?action=build)`. |
+| `overlay_hotkey_key` | string | `g` | Kodi keymap key name for the in-playback EPG overlay (§6a); blank removes the binding. |
+| `overlay_hotkey_apply` | action | — | `RunPlugin(…?action=apply_keymap)` — `keymap.apply_from_settings()` writes/removes `special://profile/keymaps/libtv.xml` (§6a). |
 
 Adding a setting requires: `resources/settings.xml` entry (new format:
 `<level>`, `<default>`, `<control>`), a msgid in `strings.po`, and a mirrored
@@ -497,15 +529,18 @@ default in `tests/conftest.py` `SETTINGS`.
 - Genre- and studio-based channel autotune (§3, `manage.autotune_genres` /
   `manage.autotune_studios`) are implemented and unit-tested but not yet
   live-verified in a real Kodi.
-- The in-playback EPG overlay (§6a) has two live-verification gaps: whether
-  the `kodi.context.item` extension appears/behaves correctly in a real
-  context menu (schema validated against `kodi-addon-checker` but never
-  exercised in Kodi itself), and whether a code-only `WindowDialog` drawn
-  over an actively playing **PVR** stream behaves the same as it would over
-  a regular video (every other PVR-specific surprise in this project —
-  `StartOffset` ignored, resolver script termination on channel change —
-  came from PVR streams differing from regular playback). See
-  `docs/live-testing.md` for the checklist.
+- The in-playback EPG overlay (§6a): the `kodi.context.item` trigger is
+  **confirmed not to work** live (schema-valid, but the menu entry did not
+  appear via either right-click or the `c` key on the tested setup; root
+  cause unknown). Three things added in response are **not yet
+  live-verified**: the `xbmc.python.script`/`RunScript(plugin.video.libtv)`
+  keymap trigger itself, the settings-driven write of
+  `special://profile/keymaps/libtv.xml` (`keymap.apply_from_settings`), and
+  whether a code-only `WindowDialog` drawn over an actively playing **PVR**
+  stream behaves the same as it would over a regular video (every other
+  PVR-specific surprise in this project — `StartOffset` ignored, resolver
+  script termination on channel change — came from PVR streams differing
+  from regular playback). See `docs/live-testing.md` for the checklist.
 - Possible future channel sources: per-show channels, smart-playlist-backed
   channels, tag filters, decade-based autotune.
 - `star-rating`/`new`/`xmltv_ns` XMLTV fields (§5) depend on the library

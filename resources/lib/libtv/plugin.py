@@ -14,7 +14,7 @@ import xbmcaddon
 import xbmcgui
 import xbmcplugin
 
-from libtv import generator, schedule
+from libtv import generator, keymap, schedule
 
 # Cross-process loop guard: Window(10000) properties are visible to every
 # short-lived resolver process talking to this Kodi instance (the same
@@ -112,6 +112,8 @@ def run(argv):
         play(handle, params.get("channel", ""))
     elif action == "build":
         build()
+    elif action == "apply_keymap":
+        keymap.apply_from_settings()
     elif action in ("channels", "channel_add", "channel_options", "autotune", "autotune_studio"):
         # Imported lazily: manage imports plugin (for build), so a top-level
         # import here would be circular.

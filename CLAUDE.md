@@ -38,10 +38,12 @@ work through its checklist — it maps which document owns what.
 - `addon.xml` — manifest; extension points define how Kodi invokes the code
 - `default.py` / `service.py` / `context.py` — thin entry shims only (see
   constraint below); they add `resources/lib` to `sys.path` and delegate.
-  `context.py` backs the `kodi.context.item` extension (in-playback EPG
-  overlay) and is invoked with Kodi's context-menu calling convention, not
-  the `plugin://` argv triple `default.py` gets — never route it through
-  `plugin.run`
+  `context.py` backs the in-playback EPG overlay, reachable two ways: the
+  `xbmc.python.script` extension (`RunScript(plugin.video.libtv)`, bindable
+  to any keymap key — the trigger to actually rely on) and the
+  `kodi.context.item` extension (confirmed **not** to work live — see "Live-
+  verified findings" below). Neither passes the `plugin://` argv triple
+  `default.py` gets — never route `context.py` through `plugin.run`
 - `resources/lib/libtv/` — the actual code:
   - `schedule.py`, `writers.py`, `channels.py` — **pure logic, no Kodi
     imports** (keep it that way); `channels.py` owns the channel-lineup
@@ -65,6 +67,11 @@ work through its checklist — it maps which document owns what.
   - `overlay.py` — in-playback EPG overlay: a code-only
     `xbmcgui.WindowDialog` (no skin XML) listing every channel's Now/Next,
     read-only against `schedule.json` (never regenerates or refreshes PVR)
+  - `keymap.py` — pure key validation (`valid_key`) and keymap XML
+    rendering (`render_keymap_xml`), plus `apply_from_settings()` which
+    writes/removes `special://profile/keymaps/libtv.xml` — backs the
+    "Hotkey" + "Save hotkey now" settings so binding the overlay's
+    `RunScript` trigger doesn't require hand-editing a keymap file
 - `resources/settings.xml` — new-format (`version="1"`) settings; labels are
   msgid numbers resolved via `resources/language/resource.language.en_gb/strings.po`
 - `tests/conftest.py` — hand-rolled fake `xbmc*` modules that make the add-on
@@ -93,7 +100,13 @@ poetry run kodi-addon-checker --branch omega .  # validate add-on structure
 `kodi-addon-checker` on the repo dir reports a folder-name error and `.venv`
 noise; for a clean signal, rsync the add-on files into a folder named
 `plugin.video.libtv` (excluding dev files) and check that. Must pass with no
-errors or warnings.
+errors or warnings. **It calls out to Kodi's official add-on repository
+over the network** (`check_addon.get_all_repo_addons`, to check for id
+collisions) with no way to skip it (`--skip-dependency-checks` doesn't
+cover this call) — if that network call is slow/unreachable, the whole run
+hangs with zero output for minutes rather than failing fast. If it hangs,
+that's an environment/network issue, not a sign the add-on is broken —
+retry later rather than trying to debug the add-on.
 
 Build the installable zip (packages **committed** state only — commit first):
 
@@ -256,6 +269,25 @@ see `docs/live-testing.md` for the checklist.
   this is confirmed; see `docs/live-testing.md` §5. Any change to this flow
   must be re-verified live across *channel changes*, not just first tune.
 
+**Live-verified findings (in-playback EPG overlay):**
+- **The `kodi.context.item` extension does not surface the "LibTV guide
+  (Now/Next)" entry** on the tested setup — neither a mouse right-click nor
+  the `c` key showed it during PVR playback (`c` instead opened Kodi's own
+  built-in channel/guide overlay). The XML is schema-valid (confirmed
+  against `kodi-addon-checker`'s bundled XSD — see the schema note above),
+  so this looks like a skin- or remote-binding issue rather than a
+  packaging mistake, but the root cause is unconfirmed. Do not treat
+  `kodi.context.item` as the reliable trigger for this feature.
+- In response, `context.py` is now also exposed via an `xbmc.python.script`
+  extension, making `RunScript(plugin.video.libtv)` callable from any
+  user-defined keymap — this sidesteps the context-menu mechanism entirely
+  and is the trigger to document/rely on. A "Hotkey" text setting +
+  "Save hotkey now" button (`keymap.apply_from_settings`) writes/removes
+  `special://profile/keymaps/libtv.xml` so the user never hand-edits a
+  keymap file. Neither the `RunScript` trigger nor the settings-driven
+  write have themselves been live-verified yet; see `docs/live-testing.md`
+  §5a for the next verification step.
+
 ## Known gaps (as of 2026-07)
 
 - No icon/fanart assets yet (checker suggests adding them).
@@ -270,12 +302,15 @@ see `docs/live-testing.md` for the checklist.
 - XMLTV `star-rating`/`new`/`xmltv_ns` fields depend on the library actually
   reporting `rating`/`playcount` for an item — not yet spot-checked against a
   real scraper's field coverage.
-- The in-playback EPG overlay (`overlay.py`, `docs/architecture.md` §6a) is
-  unit-tested only for its pure `schedule.find_now_and_next` lookup — the
-  `kodi.context.item` trigger and the `WindowDialog`/`ControlList` rendering
-  cannot be faked meaningfully and are **not yet live-verified**: whether the
-  context-menu entry actually appears/behaves correctly in a real Kodi, and
-  whether a code-only overlay window drawn over an actively playing **PVR**
-  stream (as opposed to a regular video) behaves the same way — every other
-  PVR-specific surprise in this project came from PVR streams differing from
-  regular playback. See `docs/live-testing.md`.
+- The in-playback EPG overlay (`overlay.py`, `keymap.py`,
+  `docs/architecture.md` §6a) is unit-tested for its pure
+  `schedule.find_now_and_next` lookup and `keymap.py`'s key
+  validation/XML-rendering/write-remove logic — the `WindowDialog`/
+  `ControlList` rendering cannot be faked meaningfully. The
+  `kodi.context.item` trigger is **confirmed not to work** (see "Live-
+  verified findings" above); the `RunScript(plugin.video.libtv)`/keymap
+  trigger added to work around that (including the settings-driven write of
+  `special://profile/keymaps/libtv.xml`), and whether a code-only overlay
+  window drawn over an actively playing **PVR** stream (as opposed to a
+  regular video) behaves as expected, are all still **not yet
+  live-verified**. See `docs/live-testing.md` §5a.

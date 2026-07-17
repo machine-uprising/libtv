@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<addon id="plugin.video.libtv" version="0.7.0" name="LibTV" provider-name="You">
+<addon id="plugin.video.libtv" version="0.7.2" name="LibTV" provider-name="You">
     <requires>
         <import addon="xbmc.python" version="3.0.1"/>
     </requires>
@@ -7,6 +7,7 @@
         <provides>video</provides>
     </extension>
     <extension point="xbmc.service" library="service.py"/>
+    <extension point="xbmc.python.script" library="context.py"/>
     <extension point="kodi.context.item">
         <menu id="kodi.core.main">
             <item library="context.py">
@@ -20,12 +21,12 @@
         <description lang="en_GB">Turn your movies and TV shows into linear channels with full TV guide support. Generates an M3U playlist and XMLTV guide for PVR IPTV Simple Client, with plugin-resolved streams so channels play whatever is currently on air.</description>
         <license>GPL-3.0-only</license>
         <platform>all</platform>
-        <news>v0.7.0: add an in-playback EPG overlay — a "LibTV guide (Now/Next)" entry in the video context menu while a channel is playing shows every channel's current and next programme and lets you jump straight to one, without leaving playback or relying on the skin's own PVR guide behavior.
+        <news>v0.7.2: add a "Hotkey" setting + "Save hotkey now" button under Guide &amp; playback settings, which writes special://profile/keymaps/libtv.xml for you — no more hand-editing a keymap file to bind a key to the in-playback EPG overlay.
 
-v0.6.2: renaming, reordering, or deleting a channel in Manage channels now updates the guide instantly instead of re-scanning the whole library — only adding a channel or changing its filters does a full rescan.
+v0.7.1: the video context-menu entry for the EPG overlay did not appear in live testing (root cause unknown) — add a script extension so the overlay is now also directly bindable to any key via a keymap: RunScript(plugin.video.libtv). See README/live-testing docs for the keymap snippet.
 
-v0.6.1: adding or editing a channel's filters now shows a "N items match this channel" preview before you save, so an over-narrow or accidentally empty filter is obvious immediately.
+v0.7.0: add an in-playback EPG overlay — a "LibTV guide (Now/Next)" entry in the video context menu while a channel is playing shows every channel's current and next programme and lets you jump straight to one, without leaving playback or relying on the skin's own PVR guide behavior.
 
-v0.6.0: add "Auto-generate channels by studio" alongside the existing genre autotune. Guide entries now include a star rating, an "unwatched" flag, and both SxxEyy and zero-based episode numbering. The resolver now guards against hammering the library with repeated rebuilds if Kodi re-invokes it rapidly for a broken channel. The observed-duration cache now self-invalidates on upgrade instead of trusting a possibly stale format.</news>
+v0.6.2: renaming, reordering, or deleting a channel in Manage channels now updates the guide instantly instead of re-scanning the whole library — only adding a channel or changing its filters does a full rescan.</news>
     </extension>
 </addon>
