@@ -94,12 +94,20 @@ tune/seek sequence — is documented in [`docs/architecture.md`](docs/architectu
 
 1. Build the zip (see below) or download a release.
 2. Kodi → Add-ons → Install from zip file → select `plugin.video.libtv-<version>.zip`.
-3. Install and enable **PVR IPTV Simple Client**, then point it at the
-   generated files in the add-on profile directory
-   (`userdata/addon_data/plugin.video.libtv/`):
+3. Open LibTV (add-on menu or settings) and press **Setup guide** — a
+   numbered walkthrough of everything below, generated from your actual
+   install so the paths in it are always correct.
+4. Install and enable **PVR IPTV Simple Client**, then point it at the two
+   files LibTV generates. LibTV's add-on menu and settings (**Guide &
+   playback** → **IPTV Simple Client setup paths**) show just these two
+   paths again any time you need them — Kodi has no API for add-ons to
+   configure each other's PVR client instances, so this step can't be
+   automated further:
    - M3U playlist: `channels.m3u`
    - XMLTV guide: `guide.xmltv`
-4. Open Kodi's **TV** section — your library channels appear with a full guide.
+   (both live in the add-on profile directory,
+   `userdata/addon_data/plugin.video.libtv/`)
+5. Open Kodi's **TV** section — your library channels appear with a full guide.
 
 ## Development
 
@@ -181,4 +189,12 @@ video context-menu trigger was tested live and **confirmed not to work**
 you instead of hand-edited. Both the `RunScript` trigger and the
 settings-driven write, along with whether the overlay window behaves
 correctly drawn over an actively playing PVR stream, are not yet themselves
+live-verified. As of v0.8.0, an "IPTV Simple Client setup paths" action
+(add-on menu and settings) shows the exact M3U/XMLTV paths to paste into
+IPTV Simple's own settings — full auto-configuration of IPTV Simple was
+investigated and found infeasible on Kodi 20/21 (no JSON-RPC method manages
+another add-on's settings or PVR-client instances), so this is the closest
+achievable mitigation. v0.9.0 adds a broader "Setup guide" action (first
+item in the add-on menu, first group in settings) walking the whole
+first-run flow as one numbered dialog. Neither info dialog is yet
 live-verified. See `CLAUDE.md` for development constraints and known gaps.

@@ -188,6 +188,9 @@ class _Dialog:
         CALLS.append(("xbmcgui.yesno", heading, message))
         return _dialog_answer("yesno", False)
 
+    def textviewer(self, heading, text, usemono=False) -> None:
+        CALLS.append(("xbmcgui.textviewer", heading, text))
+
 
 class _ListItem:
     def __init__(self, label: str = "", label2: str = "", path: str = "", offscreen: bool = False):

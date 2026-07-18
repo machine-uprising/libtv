@@ -57,7 +57,10 @@ work through its checklist — it maps which document owns what.
     observed-runtime cache persistence
   - `plugin.py` — menu + stream resolver (`play` = the linear-TV core),
     including a schedule-miss loop guard (a `Window(10000)` property rate-
-    limiting forced regenerations)
+    limiting forced regenerations); also two info dialogs: a first-run
+    `setup_guide` walkthrough and `show_iptv_setup_info` (just the M3U/XMLTV
+    paths to paste into IPTV Simple's settings) — auto-configuring IPTV
+    Simple itself is not possible, see "Live-verified findings" below
   - `manage.py` — dialog-driven channel management UI (with a match-count
     preview before saving a channel's filters) + genre- and studio-based
     autotune
@@ -226,6 +229,21 @@ encouraged for diagnosis.
 - For install-from-zip to work, the top-level folder inside the zip must equal
   the add-on id (`plugin.video.libtv`) — hence the `--prefix` in the build
   command; the repo directory name (`libtv`) doesn't matter.
+- **IPTV Simple Client cannot be auto-configured from LibTV — researched and
+  confirmed infeasible, don't re-attempt.** The JSON-RPC `Addons.*`
+  namespace has exactly four methods (`GetAddons`, `GetAddonDetails`,
+  `SetAddonEnabled`, `ExecuteAddon`); there is no `SetAddonSettings` or any
+  instance-management call. Since Kodi 20 (Nexus), `pvr.iptvsimple` uses a
+  multi-instance model where a new instance's settings file doesn't exist
+  until created through its own GUI ("Configure → Add add-on
+  configuration") — there's no file-only or JSON-RPC-only way to register
+  one from outside, and Kodi core issue `xbmc/xbmc#22779` confirms even the
+  Python `xbmcaddon` API can't manage instance settings. PseudoTV Live tried
+  auto-writing IPTV Simple's settings directly and it broke when the
+  multi-instance model shipped; its maintainer now requires manual
+  configuration too. The only shippable mitigation is showing the user the
+  exact paths to paste in (`plugin.show_iptv_setup_info`, `show_iptv_paths`
+  action, `docs/architecture.md` §7) — not eliminating the manual step.
 
 ## Design invariants
 
@@ -432,9 +450,11 @@ see `docs/live-testing.md` for the checklist.
   delete), genre- and studio-based autotune (`manage.autotune_genres`,
   `manage.autotune_studios`), the PVR-toggle refresh (including its
   self-healing retry, `daemon.PVR_RETRY_SECONDS`), the `"libtv_seek_offset"`
-  ListItem-property seek handoff, and the resolver's schedule-miss loop
-  guard are all unit-tested but not yet live-verified in a real Kodi — see
-  the checklist in `docs/live-testing.md`.
+  ListItem-property seek handoff, the resolver's schedule-miss loop guard,
+  and the `setup_guide`/`show_iptv_paths` info dialogs
+  (`plugin.show_setup_guide` / `plugin.show_iptv_setup_info`) are all
+  unit-tested but not yet live-verified in a real Kodi — see the checklist
+  in `docs/live-testing.md`.
 - XMLTV `star-rating`/`new`/`xmltv_ns` fields depend on the library actually
   reporting `rating`/`playcount` for an item — not yet spot-checked against a
   real scraper's field coverage.

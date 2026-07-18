@@ -80,3 +80,15 @@ msgstr ""
 msgctxt "#32117"
 msgid "Single Kodi keymap key name (e.g. g, f9) that opens the in-playback EPG overlay. Press \"Save hotkey now\" then restart Kodi to apply; clear this and save to remove the binding."
 msgstr ""
+
+msgctxt "#32118"
+msgid "Show IPTV Simple Client setup paths"
+msgstr ""
+
+msgctxt "#32119"
+msgid "Setup"
+msgstr ""
+
+msgctxt "#32120"
+msgid "Setup guide"
+msgstr ""

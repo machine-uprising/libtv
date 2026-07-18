@@ -37,6 +37,10 @@ def test_regenerate_writes_all_outputs(monkeypatch):
     assert os.path.exists(os.path.join(prof, "channels.m3u"))
     assert os.path.exists(os.path.join(prof, "guide.xmltv"))
     assert os.path.exists(os.path.join(prof, "schedule.json"))
+    assert generator.m3u_path() == os.path.join(prof, "channels.m3u")
+    assert generator.xmltv_path() == os.path.join(prof, "guide.xmltv")
+    assert os.path.exists(generator.m3u_path())
+    assert os.path.exists(generator.xmltv_path())
 
     with open(os.path.join(prof, "schedule.json"), encoding="utf-8") as f:
         persisted = json.load(f)
@@ -334,4 +338,34 @@ def test_menu_lists_actions(monkeypatch):
     urls = [c[1] for c in conftest.CALLS if c[0] == "xbmcplugin.addDirectoryItem"]
     assert any("action=channels" in u for u in urls)
     assert any("action=build" in u for u in urls)
+    assert any("action=show_iptv_paths" in u for u in urls)
+    assert any("action=setup_guide" in u for u in urls)
     assert any("action=settings" in u for u in urls)
+
+
+def test_show_iptv_paths_action_displays_m3u_and_xmltv_paths(monkeypatch):
+    from libtv import generator
+
+    _run_plugin(monkeypatch, "?action=show_iptv_paths")
+
+    views = [c for c in conftest.CALLS if c[0] == "xbmcgui.textviewer"]
+    assert len(views) == 1
+    _, heading, message = views[0]
+    assert heading == "LibTV - IPTV Simple Client setup"
+    assert generator.m3u_path() in message
+    assert generator.xmltv_path() in message
+
+
+def test_setup_guide_action_displays_walkthrough(monkeypatch):
+    from libtv import generator
+
+    _run_plugin(monkeypatch, "?action=setup_guide")
+
+    views = [c for c in conftest.CALLS if c[0] == "xbmcgui.textviewer"]
+    assert len(views) == 1
+    _, heading, message = views[0]
+    assert heading == "LibTV - Setup guide"
+    assert generator.m3u_path() in message
+    assert generator.xmltv_path() in message
+    assert "PVR IPTV Simple Client" in message
+    assert "Manage channels" in message

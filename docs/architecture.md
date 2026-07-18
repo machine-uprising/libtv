@@ -46,7 +46,7 @@ inputs for Kodi's native PVR stack and resolves streams on demand:
 | `resources/lib/libtv/channels.py` | **Pure.** Channel-lineup configuration: `channels.json` load/save, default lineup, id allocation, reorder, JSON-RPC filter building (`build_filter`), and per-channel selection-order building (`build_sort`). |
 | `resources/lib/libtv/library.py` | Kodi JSON-RPC library queries (`VideoLibrary.GetMovies` / `GetEpisodes`, filtered and sorted per channel definition) plus genre/studio pickers for the management UI. Resolves each item's runtime, falling back to stream-details duration then an observed-playback-duration cache (§4); for `order: random` also does the day-stable selection (§4). |
 | `resources/lib/libtv/generator.py` | Orchestration: fetch → schedule → write all artifacts (`regenerate`), or patch just the persisted schedule's channel metadata without a library refetch (`relabel_schedule`, §3). Owns the profile directory, the pending-seek handoff file, the version-stamped observed-runtime cache, and the PVR refresh (`refresh_pvr`). |
-| `resources/lib/libtv/plugin.py` | Plugin routing: menu, build action, and the stream resolver (`play`), including its schedule-miss loop guard (§6). |
+| `resources/lib/libtv/plugin.py` | Plugin routing: menu, build action, the setup guide and IPTV Simple setup-paths info dialogs (`show_setup_guide`, `show_iptv_setup_info`, §7), and the stream resolver (`play`), including its schedule-miss loop guard (§6). |
 | `resources/lib/libtv/manage.py` | Dialog-driven channel management UI (add/rename/filter/order/reorder/delete) plus genre- and studio-based channel autotune (§3). |
 | `resources/lib/libtv/daemon.py` | Service loop (periodic regeneration, self-healing PVR-refresh retry) + `JoinInProgressPlayer` (the seek half of join-in-progress; also records observed durations). |
 | `resources/lib/libtv/overlay.py` | In-playback EPG overlay (§6a): a code-only `xbmcgui.WindowDialog` listing every channel's Now/Next, read-only against `schedule.json`. |
@@ -528,6 +528,37 @@ without a Kodi restart. Guards, all of which make it return `False`:
 and the service loop — **never from the stream resolver**: `plugin.play` also
 regenerates on a schedule miss, and a toggle mid-tune would abort the tune.
 
+**IPTV Simple's own M3U/XMLTV paths cannot be configured by this add-on.**
+The user must still open IPTV Simple's settings and enter
+`generator.m3u_path()` / `generator.xmltv_path()` manually — this was
+investigated and found infeasible on Kodi 20/21, not merely unimplemented:
+the JSON-RPC `Addons.*` namespace has exactly four methods
+(`GetAddons`/`GetAddonDetails`/`SetAddonEnabled`/`ExecuteAddon`), none of
+which read or write another add-on's settings or manage its PVR-client
+*instances*; since Kodi 20 (Nexus), `pvr.iptvsimple` uses a multi-instance
+model where a new instance's settings file doesn't exist until created
+through IPTV Simple's own GUI ("Configure → Add add-on configuration") —
+there is no file-only or JSON-RPC-only way to register one from outside; and
+Kodi core issue `xbmc/xbmc#22779` confirms even the Python `xbmcaddon` API
+can't manage instance settings. PseudoTV Live previously auto-wrote IPTV
+Simple's settings directly, but that broke when Nexus's multi-instance model
+shipped, and its maintainer now requires the same manual configuration this
+add-on does. Given that ceiling, `plugin.show_iptv_setup_info()` (wired to
+the `show_iptv_paths` action, reachable from both the add-on's main menu and
+a settings button, §8) shows the two paths in a dialog so the user only has
+to copy/paste them rather than locate the profile directory by hand — it
+does not, and cannot, eliminate the manual entry step.
+
+`plugin.show_setup_guide()` (the `setup_guide` action, reachable from both
+the main menu — first item — and a settings button that is also the first
+group in the settings screen, §8) is a broader, numbered walkthrough of the
+whole first-run flow (scan the library, optionally customize channels,
+rebuild, install/enable IPTV Simple, paste in the two paths, open the TV
+section, optionally bind the EPG overlay hotkey) rather than just the two
+paths — it exists as a single, prominent starting point for a brand-new
+install, with `show_iptv_setup_info` remaining as the narrower dialog for
+re-finding just the paths later.
+
 **Self-healing refresh retry**: when a regen cycle's `refresh_pvr()` is
 skipped specifically because something was playing, `daemon.run()` doesn't
 just wait for the next full `regen_interval_hours` cycle — it retries *only*
@@ -544,6 +575,7 @@ transient.)
 
 | id | type | default | effect |
 | --- | --- | --- | --- |
+| `setup_guide` | action | — | `RunPlugin(…?action=setup_guide)` — first-run walkthrough dialog (§7); first group in the settings screen. |
 | `max_items` | integer 10–1000 | 150 | Cap on library items pulled per channel (§3/§4 `order` controls *which* items land within the cap). |
 | `shuffle` | boolean | true | Deterministic per-day reshuffle of each channel's already-selected items, on top of the per-channel `order`. |
 | `epg_hours` | integer 6–72 | 24 | Guide horizon: schedule covers `now + epg_hours`. |
@@ -554,6 +586,7 @@ transient.)
 | `autotune_channels` | action | — | `RunPlugin(…?action=autotune)` — genre-based channel autotune (§3). |
 | `autotune_studio_channels` | action | — | `RunPlugin(…?action=autotune_studio)` — studio-based channel autotune (§3). |
 | `regenerate_now` | action | — | `RunPlugin(…?action=build)`. |
+| `show_iptv_paths` | action | — | `RunPlugin(…?action=show_iptv_paths)` — shows the M3U/XMLTV paths to paste into IPTV Simple's own settings (§7); does not configure IPTV Simple itself. |
 | `overlay_hotkey_key` | string | `g` | Kodi keymap key name for the in-playback EPG overlay (§6a); blank removes the binding. |
 | `overlay_hotkey_apply` | action | — | `RunPlugin(…?action=apply_keymap)` — `keymap.apply_from_settings()` writes/removes `special://profile/keymaps/libtv.xml` (§6a). |
 
@@ -644,6 +677,12 @@ default in `tests/conftest.py` `SETTINGS`.
   overlay behaves correctly over an actively playing PVR stream
   specifically is still worth a dedicated check even once these are
   confirmed. See `docs/live-testing.md` for the checklist.
+- The `setup_guide` and `show_iptv_paths` info dialogs (§7,
+  `plugin.show_setup_guide` / `plugin.show_iptv_setup_info`) are unit-tested
+  for their dispatch and message content but not yet live-verified — both
+  use a standard `xbmcgui.Dialog().textviewer()`, not a hand-built window
+  like the EPG overlay, so they carry little of that feature's risk, but
+  should still get one live smoke test each (see `docs/live-testing.md`).
 - Possible future channel sources: per-show channels, smart-playlist-backed
   channels, tag filters, decade-based autotune.
 - `star-rating`/`new`/`xmltv_ns` XMLTV fields (§5) depend on the library

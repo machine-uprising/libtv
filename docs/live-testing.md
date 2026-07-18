@@ -51,6 +51,11 @@ rebuilds — see the packaging gotchas in `CLAUDE.md`.) Then in Kodi:
 
 ## 4. Wire up IPTV Simple Client
 
+LibTV's add-on menu (first item) and settings (first group, top of the
+screen) both have a **Setup guide** button (`plugin.show_setup_guide`) that
+walks this whole section as a single numbered dialog — open it first and
+confirm it reads correctly before working through the steps below by hand.
+
 1. Enable **PVR IPTV Simple Client** (Add-ons → My add-ons → PVR clients).
 2. Generate the files first so they exist: open LibTV's settings and press
    **Regenerate now** (this runs `RunPlugin(plugin://plugin.video.libtv/?action=build)`),
@@ -58,7 +63,12 @@ rebuilds — see the packaging gotchas in `CLAUDE.md`.) Then in Kodi:
 3. The files land in the add-on profile directory:
    `userdata/addon_data/plugin.video.libtv/` — on Windows Kodi that is
    `%APPDATA%\Kodi\userdata\addon_data\plugin.video.libtv\`. You should see
-   `channels.m3u`, `guide.xmltv`, and `schedule.json`.
+   `channels.m3u`, `guide.xmltv`, and `schedule.json`. Instead of hunting for
+   this directory by hand, LibTV's add-on menu and settings ("Guide &
+   playback" → **IPTV Simple Client setup paths**) both open a dialog
+   (`plugin.show_iptv_setup_info`) showing the exact `channels.m3u`/
+   `guide.xmltv` paths to paste below — this is the first thing to
+   live-verify for this feature (see the checklist item in §5).
 4. Configure IPTV Simple:
    - **General → M3U Play List** → path to `channels.m3u` (local file).
    - **EPG Settings → XMLTV** → path to `guide.xmltv`.
@@ -222,6 +232,19 @@ rebuilds — see the packaging gotchas in `CLAUDE.md`.) Then in Kodi:
     either rebuild deleting the other's channels — e.g. run genre autotune
     for Movies, then studio autotune for Movies, and confirm both sets of
     channels are present in the guide afterward.
+- **IPTV Simple Client setup paths dialog** — from either the add-on's main
+  menu or the settings button ("Guide & playback" → **IPTV Simple Client
+  setup paths**), confirm a text dialog opens showing the real, full
+  `channels.m3u` and `guide.xmltv` paths (matching what you see on disk in
+  step 4 above), and that opening it does not disturb any in-progress
+  playback or trigger a PVR refresh (no `Addons.SetAddonEnabled` /
+  `LibTV: toggled IPTV Simple...` log lines).
+- **Setup guide dialog** — from either the add-on's main menu (first item)
+  or settings (first group, **Setup guide**), confirm the full numbered
+  walkthrough opens, is readable/scrollable in a `textviewer` dialog (long
+  Windows paths shouldn't get cut off), the M3U/XMLTV paths it shows match
+  what's actually on disk, and — same as the paths-only dialog above —
+  opening it never disturbs playback or triggers a PVR refresh.
 - **Resolver loop guard** — hard to trigger deliberately without a broken
   channel, but if you ever see `LibTV: schedule miss for <id>, regenerating`
   logged repeatedly within a few seconds for the same channel, the very next

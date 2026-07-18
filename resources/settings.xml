@@ -2,6 +2,13 @@
 <settings version="1">
     <section id="plugin.video.libtv">
         <category id="general" label="32100" help="">
+            <group id="0" label="32119">
+                <setting id="setup_guide" type="action" label="32120" help="">
+                    <level>0</level>
+                    <data>RunPlugin(plugin://plugin.video.libtv/?action=setup_guide)</data>
+                    <control type="button" format="action"/>
+                </setting>
+            </group>
             <group id="1" label="32101">
                 <setting id="max_items" type="integer" label="32102" help="">
                     <level>0</level>
@@ -65,6 +72,11 @@
                 <setting id="regenerate_now" type="action" label="32108" help="">
                     <level>0</level>
                     <data>RunPlugin(plugin://plugin.video.libtv/?action=build)</data>
+                    <control type="button" format="action"/>
+                </setting>
+                <setting id="show_iptv_paths" type="action" label="32118" help="">
+                    <level>0</level>
+                    <data>RunPlugin(plugin://plugin.video.libtv/?action=show_iptv_paths)</data>
                     <control type="button" format="action"/>
                 </setting>
             </group>

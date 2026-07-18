@@ -41,6 +41,14 @@ def channels_path():
     return os.path.join(profile_dir(), CHANNELS_NAME)
 
 
+def m3u_path():
+    return os.path.join(profile_dir(), M3U_NAME)
+
+
+def xmltv_path():
+    return os.path.join(profile_dir(), XMLTV_NAME)
+
+
 def load_channel_defs():
     """Channel definitions from channels.json (default lineup if absent)."""
     return channels.load(channels_path())
@@ -85,17 +93,17 @@ def regenerate():
 
     data = schedule.build_schedule(lineup, anchor, now + epg_hours * 3600)
 
-    prof = profile_dir()
-    with open(os.path.join(prof, M3U_NAME), "w", encoding="utf-8") as f:
+    with open(m3u_path(), "w", encoding="utf-8") as f:
         f.write(writers.render_m3u(data, addon_id))
-    with open(os.path.join(prof, XMLTV_NAME), "w", encoding="utf-8") as f:
+    with open(xmltv_path(), "w", encoding="utf-8") as f:
         f.write(writers.render_xmltv(data))
     with open(schedule_path(), "w", encoding="utf-8") as f:
         json.dump(data, f)
 
     total = sum(len(ch["programmes"]) for ch in data["channels"])
+    n_channels = len(data["channels"])
     xbmc.log(
-        f"LibTV: generated {len(data['channels'])} channels / {total} programmes in {prof}",
+        f"LibTV: generated {n_channels} channels / {total} programmes in {profile_dir()}",
         xbmc.LOGINFO,
     )
     return data
@@ -137,10 +145,9 @@ def relabel_schedule(definitions):
     data["channels"] = patched
 
     addon_id = xbmcaddon.Addon().getAddonInfo("id")
-    prof = profile_dir()
-    with open(os.path.join(prof, M3U_NAME), "w", encoding="utf-8") as f:
+    with open(m3u_path(), "w", encoding="utf-8") as f:
         f.write(writers.render_m3u(data, addon_id))
-    with open(os.path.join(prof, XMLTV_NAME), "w", encoding="utf-8") as f:
+    with open(xmltv_path(), "w", encoding="utf-8") as f:
         f.write(writers.render_xmltv(data))
     with open(schedule_path(), "w", encoding="utf-8") as f:
         json.dump(data, f)
