@@ -400,10 +400,15 @@ Two ways to trigger it, both reaching the same `context.py`/`overlay.show()`:
   background (`xbmcgui.ControlImage` over `resources/media/overlay_bg.png`,
   a small solid semi-transparent PNG and the add-on's only bundled image
   asset) is drawn first so it sits behind everything else, since a
-  code-only `WindowDialog` has no background of its own.
-  - **Rows are plain `xbmcgui.ControlLabel`s, one per channel, not an
-    `xbmcgui.ControlList`.** `ControlList` was tried first and went through
-    three live fix attempts (item-height keyword, focus timing,
+  code-only `WindowDialog` has no background of its own. The panel is a
+  **fixed strip along the bottom margin** (`_PANEL_X/_PANEL_Y/_PANEL_W/
+  _PANEL_H`), not a (near-)full-height panel — a code-only `WindowDialog`'s
+  default coordinate space is 1280x720 regardless of the skin's actual
+  resolution, confirmed live when an earlier `y=40..680` panel visibly
+  covered nearly the whole screen.
+  - **Rows are plain `xbmcgui.ControlLabel`s, reused via a scroll window,
+    not an `xbmcgui.ControlList`.** `ControlList` was tried first and went
+    through four live fix attempts (item-height keyword, focus timing,
     background/colors, font/single-label) that each addressed a real bug
     but still ended with **zero visual output of any kind — not even a
     focus rectangle** once the background itself was confirmed visible.
@@ -411,18 +416,28 @@ Two ways to trigger it, both reaching the same `context.py`/`overlay.show()`:
     focus indication, pointed at the no-skin `ControlList` item-rendering
     path itself rather than any one parameter — so rendering was rebuilt
     on `ControlLabel`, the most primitive text-drawing control Kodi has,
-    removing that whole axis of uncertainty. Each label gets an explicit
-    `font`/`textColor` (no skin to fall back to) and a fixed row height
-    computed to fit every channel in the background's bounds without
-    needing scrolling/paging.
+    removing that whole axis of uncertainty. Only `_VISIBLE_ROWS` labels
+    are ever created (not one per channel); `_EpgOverlay._render()` maps
+    them to a `_scroll` window into the full row list, refreshing text and
+    color content **from `onInit()`**, not `__init__` — a prior bug
+    (`setFocus()` called before the window was shown, having no effect)
+    showed that control mutations aren't reliable before the window is
+    actually visible.
   - **Navigation and the current-row highlight are hand-rolled, not
-    native.** `_EpgOverlay.onAction` handles `ACTION_MOVE_UP`/
-    `ACTION_MOVE_DOWN` itself, moving an internal `_cursor` index and
-    recoloring the affected labels' `textColor` via `setLabel(...)`
+    native.** `_EpgOverlay.onAction` moves an internal `_cursor`/`_scroll`
+    pair and recolors the affected labels' `textColor` via `setLabel(...)`
     (`_FOCUS_COLOR` for the current row) — no `xbmcgui` control focus or
     `setFocus()` is used at all, since `ControlLabel`s aren't focusable in
     the first place and the goal was to depend on as little
     native-rendering behavior as possible after `ControlList`'s failure.
+    **Live-verified finding**: the generic `ACTION_MOVE_UP`/
+    `ACTION_MOVE_DOWN` this overlay originally listened for did nothing —
+    pressing up/down instead drove Kodi's own native channel-preview
+    banner (the channel info shown changed, but nothing tuned, and the
+    overlay's own highlight never moved), meaning a remote/keyboard press
+    during PVR playback generates `ACTION_CHANNEL_UP`/`ACTION_CHANNEL_DOWN`
+    instead — `onAction` now handles both pairs, since handling an action
+    that never fires on a given setup is harmless.
     `ACTION_SELECT_ITEM`/`ACTION_MOUSE_LEFT_CLICK` resolve the current
     cursor position to a channel id and close the window;
     `ACTION_PREVIOUS_MENU`/`ACTION_NAV_BACK` close without selecting.
@@ -595,13 +610,22 @@ default in `tests/conftest.py` `SETTINGS`.
   focus rectangle, across further attempts (font, colors, single vs. dual
   label). That total silence pointed at the no-skin `ControlList`
   rendering path itself, so rendering was rebuilt on plain
-  `ControlLabel`s with hand-rolled navigation/highlighting instead (see
-  §6a) — **not yet live-verified**. Every other PVR-specific surprise in
-  this project — `StartOffset` ignored, resolver script termination on
-  channel change — came from PVR streams differing from regular playback,
-  so whether the overlay behaves correctly over an actively playing PVR
-  stream specifically is still worth a dedicated check even once rendering
-  itself is confirmed. See `docs/live-testing.md` for the checklist.
+  `ControlLabel`s with hand-rolled navigation/highlighting (§6a) — this
+  **confirmed working**: readable text now renders. Two things remained
+  broken on that pass and are addressed but **not yet re-verified**: (1)
+  up/down did nothing to the overlay (Kodi's native channel-preview
+  banner responded instead) — traced to the overlay listening for the
+  generic `ACTION_MOVE_UP`/`ACTION_MOVE_DOWN` while a remote/keyboard
+  during PVR playback apparently sends `ACTION_CHANNEL_UP`/
+  `ACTION_CHANNEL_DOWN`, now also handled; (2) the panel took up nearly
+  the full screen height instead of a small bottom-margin strip — now a
+  fixed-size strip with a handful of `ControlLabel`s reused via scrolling
+  rather than one per channel. Every other PVR-specific surprise in this
+  project — `StartOffset` ignored, resolver script termination on channel
+  change — came from PVR streams differing from regular playback, so
+  whether the overlay behaves correctly over an actively playing PVR
+  stream specifically is still worth a dedicated check even once
+  navigation is confirmed. See `docs/live-testing.md` for the checklist.
 - Possible future channel sources: per-show channels, smart-playlist-backed
   channels, tag filters, decade-based autotune.
 - `star-rating`/`new`/`xmltv_ns` XMLTV fields (§5) depend on the library

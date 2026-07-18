@@ -380,12 +380,27 @@ see `docs/live-testing.md` for the checklist.
   native list/button focus behavior. No `setFocus()`/`onInit()` at all
   anymore — `ControlLabel`s aren't focusable, and the goal was to depend
   on as little native rendering as possible after `ControlList`'s
-  complete failure. **Not yet live-verified.** See `docs/live-testing.md`
-  §5a. If this *also* renders nothing, the next suspect is the window
-  itself / `ControlImage` background rendering path (already confirmed
-  working, so unlikely) or something specific to this Kodi/skin
-  combination that goes beyond per-control fixes — worth trying a single
-  `ControlLabel` in isolation (no list of rows) to narrow further.
+  complete failure.
+- **Sixth live pass: text finally rendered readable rows** — the
+  `ControlLabel` rewrite worked for rendering. Two things were still
+  broken: (1) **up/down did nothing to the overlay — Kodi's own native
+  channel-preview banner responded instead** (channel info changed,
+  nothing tuned, the overlay's highlight never moved). Root cause: the
+  overlay listened for the generic `ACTION_MOVE_UP`(3)/`ACTION_MOVE_DOWN`(4),
+  but a remote/keyboard press during actual PVR playback apparently
+  generates `ACTION_CHANNEL_UP`(184)/`ACTION_CHANNEL_DOWN`(185) instead —
+  a Live-TV-specific action pair, confirmed to exist in `xbmcgui`, that
+  this project hadn't encountered before. **Fix**: `onAction` now handles
+  both pairs (handling one that never fires on a given setup is
+  harmless). (2) The panel spanned nearly the full screen height
+  (**user-reported**, not a bug found via log) instead of a small
+  bottom-margin strip. **Fix**: rebuilt the panel as a fixed
+  `_PANEL_X/_PANEL_Y/_PANEL_W/_PANEL_H` strip near the bottom, with only
+  `_VISIBLE_ROWS` (4) `ControlLabel`s ever created and reused via a
+  `_scroll` window into the full row list — not one label per channel —
+  refreshed from `onInit()` (matching the `setFocus()` lesson: control
+  mutations made in `__init__`, before the window is shown, aren't
+  reliable). **Not yet live-verified.** See `docs/live-testing.md` §5a.
 
 ## Known gaps (as of 2026-07)
 
@@ -409,11 +424,14 @@ see `docs/live-testing.md` for the checklist.
   `kodi.context.item` trigger is **confirmed not to work** (see "Live-
   verified findings" above); the `RunScript(plugin.video.libtv)`/keymap
   trigger (with the `FullscreenLiveTV` fix) is **confirmed to fire** and
-  reliably opens the window. Still open: whether the rebuilt
-  `ControlLabel`-based rendering (see "Live-verified findings" — this
+  reliably opens the window, and the `ControlLabel`-based rendering (which
   replaced an `xbmcgui.ControlList` that rendered nothing at all across
-  four fix attempts) actually displays legible rows, whether the
-  hand-rolled up/down navigation and highlight work, whether selecting a
-  row tunes the channel, and whether closing without selecting leaves
-  playback alone — drawn over an actively playing **PVR** stream
-  specifically. See `docs/live-testing.md` §5a.
+  four fix attempts) is **confirmed to display readable rows**. Still
+  open, addressed but not yet re-verified: whether the `ACTION_CHANNEL_UP`/
+  `ACTION_CHANNEL_DOWN` handling actually drives navigation (up/down
+  previously drove Kodi's own native channel-preview banner instead, with
+  the overlay's own highlight never moving), whether selecting a row tunes
+  the channel, whether closing without selecting leaves playback alone,
+  and whether the new bottom-margin scrolling panel actually looks/scrolls
+  right — drawn over an actively playing **PVR** stream specifically. See
+  `docs/live-testing.md` §5a.

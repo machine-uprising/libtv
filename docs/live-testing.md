@@ -326,12 +326,19 @@ no-skin `ControlList` item-rendering path itself rather than any one
 keyword. **Fix**: rendering rebuilt on plain `xbmcgui.ControlLabel`s (one
 per channel row) with hand-rolled up/down navigation and highlight
 (`_EpgOverlay.onAction` tracks its own cursor and recolors labels
-directly) instead of any native list/button focus behavior. **Whether the
-overlay now actually shows readable rows, and whether navigation/
-selection/tuning work, has still not been checked.** That's the next thing
-to verify. If this *still* shows nothing, try confirming a single
-`ControlLabel` renders in isolation before suspecting anything else — the
-background (`ControlImage`) is the one piece confirmed working so far.
+directly) instead of any native list/button focus behavior. **Confirmed
+live**: readable text rows finally appeared. Two things were still wrong:
+(1) up/down changed Kodi's own native channel-info banner instead of
+anything in the overlay (the highlight never moved, and nothing tuned) —
+traced to listening for the generic `ACTION_MOVE_UP`/`ACTION_MOVE_DOWN`
+when a remote/keyboard during PVR playback apparently sends
+`ACTION_CHANNEL_UP`/`ACTION_CHANNEL_DOWN` instead; `onAction` now handles
+both pairs. (2) The panel spanned nearly the full screen height instead
+of a small strip near the bottom — rebuilt as a fixed bottom-margin panel
+with only 4 `ControlLabel`s reused via scrolling, not one per channel.
+**Whether navigation/highlight/selection/tuning and the new panel
+size/scrolling now work as expected has still not been checked.** That's
+the next thing to verify.
 
 Checklist, using whichever trigger you're testing:
 
