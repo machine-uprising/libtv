@@ -397,10 +397,32 @@ see `docs/live-testing.md` for the checklist.
   bottom-margin strip. **Fix**: rebuilt the panel as a fixed
   `_PANEL_X/_PANEL_Y/_PANEL_W/_PANEL_H` strip near the bottom, with only
   `_VISIBLE_ROWS` (4) `ControlLabel`s ever created and reused via a
-  `_scroll` window into the full row list — not one label per channel —
-  refreshed from `onInit()` (matching the `setFocus()` lesson: control
-  mutations made in `__init__`, before the window is shown, aren't
-  reliable). **Not yet live-verified.** See `docs/live-testing.md` §5a.
+  `_scroll` window into the full row list — not one label per channel.
+- **Seventh live pass: the panel moved to the bottom margin correctly, but
+  two things were still wrong.** (1) **No text was visible until the
+  first up/down press** — the previous round's fix (`_render()` called
+  from `onInit()`) populated labels via `setLabel()` right as the window
+  was shown, but this apparently doesn't paint until the *next* redraw;
+  the very first successful "readable text rows" test (the round before)
+  had set real text as a **constructor argument**, not via a later
+  `setLabel()` call — that's the actual distinction, not `onInit()` vs.
+  `__init__()` timing as first assumed. **Fix**: labels are now always
+  constructed with their real text up front (`ControlLabel(...,
+  label=self._row_text(i))`); `onInit()` was removed entirely — no longer
+  needed. (2) **The gold `textColor` highlight never appeared, on any
+  row, even after up/down worked** — the identical "post-initial-render
+  `setLabel()` color change doesn't repaint" problem `ControlList`'s
+  `selectedColor` already had. **Fix**: replaced color-based highlighting
+  with a text prefix (`"> "` on the current row, `"  "` on others) — text
+  *content* changes are the one thing confirmed twice now to reliably
+  repaint; don't reach for dynamic control colors in this add-on's
+  code-only windows again without expecting this. Also confirmed
+  (unfixable from Python): **Kodi's native channel-preview banner fires
+  alongside the overlay's own cursor movement** on every
+  `ACTION_CHANNEL_UP`/`DOWN` — cosmetic only, the actual tuned channel
+  doesn't change from it. **Not yet live-verified**: does the marker
+  highlight actually show, does selecting a row tune the channel. See
+  `docs/live-testing.md` §5a.
 
 ## Known gaps (as of 2026-07)
 
@@ -424,14 +446,15 @@ see `docs/live-testing.md` for the checklist.
   `kodi.context.item` trigger is **confirmed not to work** (see "Live-
   verified findings" above); the `RunScript(plugin.video.libtv)`/keymap
   trigger (with the `FullscreenLiveTV` fix) is **confirmed to fire** and
-  reliably opens the window, and the `ControlLabel`-based rendering (which
+  reliably opens the window, the `ControlLabel`-based rendering (which
   replaced an `xbmcgui.ControlList` that rendered nothing at all across
-  four fix attempts) is **confirmed to display readable rows**. Still
-  open, addressed but not yet re-verified: whether the `ACTION_CHANNEL_UP`/
-  `ACTION_CHANNEL_DOWN` handling actually drives navigation (up/down
-  previously drove Kodi's own native channel-preview banner instead, with
-  the overlay's own highlight never moving), whether selecting a row tunes
-  the channel, whether closing without selecting leaves playback alone,
-  and whether the new bottom-margin scrolling panel actually looks/scrolls
-  right — drawn over an actively playing **PVR** stream specifically. See
-  `docs/live-testing.md` §5a.
+  four fix attempts) is **confirmed to display readable rows**, and the
+  bottom-margin scrolling panel is **confirmed correctly positioned**.
+  Kodi's native channel-preview banner firing alongside
+  `ACTION_CHANNEL_UP`/`DOWN` is a **confirmed, accepted cosmetic quirk**
+  (the actual tuned channel doesn't change from it). Still open,
+  addressed but not yet re-verified: does the marker-based (`"> "`)
+  highlight now actually show (the previous `textColor`-based one never
+  did, on any row); does selecting a row tune the channel; does closing
+  without selecting leave playback alone — drawn over an actively playing
+  **PVR** stream specifically. See `docs/live-testing.md` §5a.

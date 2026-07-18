@@ -336,9 +336,23 @@ when a remote/keyboard during PVR playback apparently sends
 both pairs. (2) The panel spanned nearly the full screen height instead
 of a small strip near the bottom — rebuilt as a fixed bottom-margin panel
 with only 4 `ControlLabel`s reused via scrolling, not one per channel.
-**Whether navigation/highlight/selection/tuning and the new panel
-size/scrolling now work as expected has still not been checked.** That's
-the next thing to verify.
+**Confirmed live**: panel now sits correctly in the bottom margin, and
+the overlay's own cursor now moves on up/down (fixing that part) — but
+two more things were wrong: (1) **no text was visible until the first
+up/down press** — labels were populated via `setLabel()` from `onInit()`,
+which apparently doesn't paint until the next redraw; fixed by always
+constructing labels with their real text as a constructor argument
+instead (`onInit()` removed, no longer needed). (2) **the gold highlight
+never appeared, on any row** — the same "`setLabel(textColor=...)` after
+the first render doesn't repaint" problem `ControlList`'s `selectedColor`
+already had; replaced with a `"> "` text-prefix marker instead of a color
+change. Also confirmed (and accepted as a cosmetic, Python-unfixable
+side effect): Kodi's own native channel-preview banner still fires
+alongside `ACTION_CHANNEL_UP`/`DOWN` — the actual tuned channel does not
+change from it, only an explicit selection does. **Whether the marker
+highlight now shows, and whether selecting a row tunes the channel, has
+still not been checked** (Enter/OK wasn't reachable to test last round).
+That's the next thing to verify.
 
 Checklist, using whichever trigger you're testing:
 

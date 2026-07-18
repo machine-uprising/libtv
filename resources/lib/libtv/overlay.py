@@ -38,8 +38,15 @@ _BG_IMAGE = os.path.join(
 )
 
 _TEXT_COLOR = "0xFFFFFFFF"
-_FOCUS_COLOR = "0xFFFFD700"
 _FONT = "font12"  # present in effectively every skin's Font.xml
+# The current row is marked with a text prefix, not a text color change.
+# Live testing found ControlLabel.setLabel(textColor=...) calls made after
+# the initial render didn't visibly change anything (an earlier ControlList
+# had the same problem with its selectedColor) — text CONTENT changes are
+# the one thing confirmed to reliably repaint, so highlighting piggybacks
+# on that instead of depending on dynamic color updates again.
+_CURSOR_MARK = "> "
+_NO_MARK = "  "
 
 # A strip along the bottom margin, not the (near-)full-height panel of
 # earlier versions — a code-only WindowDialog's default coordinate space is
@@ -110,35 +117,31 @@ class _EpgOverlay(xbmcgui.WindowDialog):
         self._background = xbmcgui.ControlImage(_PANEL_X, _PANEL_Y, _PANEL_W, _PANEL_H, _BG_IMAGE)
         self.addControl(self._background)
 
-        # Labels start empty; real content is set from onInit() (see below)
-        # rather than here, since a prior bug (setFocus() called from
-        # __init__, before the window was shown, silently doing nothing)
-        # showed that post-construction control mutations aren't reliable
-        # before the window is actually visible — _render() plays it safe
-        # by doing all content/color setting there instead.
+        # Real content is passed to the constructor directly, not set via a
+        # later setLabel() call — live testing found labels built empty and
+        # populated from onInit() didn't paint until the *next* redraw (the
+        # first keypress), while labels constructed with their real text
+        # up front showed correctly from the very first frame.
         self._labels = []
         for i in range(min(_VISIBLE_ROWS, len(rows))):
             label = xbmcgui.ControlLabel(
                 _PANEL_X + 20, _PANEL_Y + 10 + i * _ROW_HEIGHT,
                 _PANEL_W - 40, _ROW_HEIGHT - 4,
-                "", font=_FONT, textColor=_TEXT_COLOR,
+                self._row_text(i), font=_FONT, textColor=_TEXT_COLOR,
             )
             self.addControl(label)
             self._labels.append(label)
 
-    def onInit(self):
-        self._render()
+    def _row_text(self, row_index):
+        _, name, current, upcoming = self._rows[row_index]
+        mark = _CURSOR_MARK if row_index == self._cursor else _NO_MARK
+        return f"{mark}{_row_label(name, current, upcoming)}"
 
     def _render(self):
         for i, label in enumerate(self._labels):
             row_index = self._scroll + i
-            if row_index < len(self._rows):
-                _, name, current, upcoming = self._rows[row_index]
-                text = _row_label(name, current, upcoming)
-                color = _FOCUS_COLOR if row_index == self._cursor else _TEXT_COLOR
-            else:
-                text, color = "", _TEXT_COLOR
-            label.setLabel(text, font=_FONT, textColor=color)
+            text = self._row_text(row_index) if row_index < len(self._rows) else ""
+            label.setLabel(text, font=_FONT, textColor=_TEXT_COLOR)
 
     def _move(self, delta):
         if not self._rows:
