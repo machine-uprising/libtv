@@ -50,14 +50,20 @@ _ACTION_NAV_BACK = 92
 
 
 def _row_label(name, current, upcoming):
-    """Pure formatting for one channel's list row: (label, label2)."""
+    """Pure formatting for one channel's list row: a single combined string.
+
+    A bare, code-only ControlList has no skin XML defining a layout for a
+    second label — there is no defined place for ListItem.label2 to draw
+    at all — so unlike a normal skinned list, everything must be one
+    label string rather than split across label/label2.
+    """
     if current is None:
         now_txt = "Off air"
     else:
         remaining_min = max(0, int((current["stop"] - time.time()) // 60))
         now_txt = f"{current['title']} ({remaining_min}m left)"
-    next_txt = "" if upcoming is None else f"Next: {upcoming['title']}"
-    return name, f"{now_txt}   {next_txt}".rstrip()
+    next_txt = "" if upcoming is None else f"  |  Next: {upcoming['title']}"
+    return f"{name}: {now_txt}{next_txt}"
 
 
 class _EpgOverlay(xbmcgui.WindowDialog):
@@ -73,19 +79,18 @@ class _EpgOverlay(xbmcgui.WindowDialog):
         # names (_itemHeight, _space, ...) for everything past selectedColor
         # — the bare "itemHeight" from the API docs' prose raises TypeError
         # at runtime (confirmed live on Omega/Windows; kodistubs matches the
-        # real signature here, the docstring text does not). textColor and
-        # selectedColor are explicit (not left to a possibly-invisible
-        # skin default) so rows are legible and the focused one is visibly
-        # distinct without needing separate focus-texture assets.
+        # real signature here, the docstring text does not). font, textColor,
+        # and selectedColor are all explicit — a code-only list with no font
+        # specified was confirmed live to render its background/focus but no
+        # text at all (nothing to fall back to without a skin); 'font12' is
+        # present in effectively every skin's Font.xml, including Estuary.
         self._list = xbmcgui.ControlList(
             60, 60, 1200, 600,
-            textColor="0xFFFFFFFF", selectedColor="0xFFFFD700",
+            font="font12", textColor="0xFFFFFFFF", selectedColor="0xFFFFD700",
             _itemHeight=60,
         )
-        items = []
-        for _, name, current, upcoming in rows:
-            label, label2 = _row_label(name, current, upcoming)
-            items.append(xbmcgui.ListItem(label=label, label2=label2))
+        items = [xbmcgui.ListItem(label=_row_label(name, current, upcoming))
+                 for _, name, current, upcoming in rows]
         self._list.addItems(items)
         self.addControl(self._list)
 

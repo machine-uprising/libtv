@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<addon id="plugin.video.libtv" version="0.7.7" name="LibTV" provider-name="You">
+<addon id="plugin.video.libtv" version="0.7.8" name="LibTV" provider-name="You">
     <requires>
         <import addon="xbmc.python" version="3.0.1"/>
     </requires>
@@ -21,10 +21,10 @@
         <description lang="en_GB">Turn your movies and TV shows into linear channels with full TV guide support. Generates an M3U playlist and XMLTV guide for PVR IPTV Simple Client, with plugin-resolved streams so channels play whatever is currently on air.</description>
         <license>GPL-3.0-only</license>
         <platform>all</platform>
-        <news>v0.7.7: fix the EPG overlay being completely invisible — a code-only WindowDialog draws no background of its own, and the ControlList had no explicit text colors, so it opened and closed correctly (confirmed via log + double-Esc test) but rendered nothing on screen. Added a small bundled background image behind the list plus explicit text/selected colors so rows are legible over playing video.
+        <news>v0.7.8: fix the EPG overlay showing a background but no text at all — the ControlList had no explicit font (nothing to fall back to without a skin) and used label/label2, which a bare no-skin list has no defined layout for. Now sets an explicit font and combines Now/Next into a single label per row.
 
-v0.7.6: add diagnostic log lines (LibTV: overlay.show() invoked / showing N channel row(s) / overlay closed / selected channel X) around the EPG overlay, since two silent-ish failures in a row made it hard to tell "RunScript never fired" apart from "it ran fine but nothing visible happened" from kodi.log alone. No behavior change.
+v0.7.7: fix the EPG overlay being completely invisible — a code-only WindowDialog draws no background of its own, and the ControlList had no explicit text colors, so it opened and closed correctly (confirmed via log + double-Esc test) but rendered nothing on screen. Added a small bundled background image behind the list plus explicit text/selected colors so rows are legible over playing video.
 
-v0.7.5: fix the EPG overlay not accepting focus — setFocus() was called from __init__, before the window was shown, which Kodi logs as "Control N in window M has been asked to focus, but it can't" with no traceback. Focus is now set from onInit(), the documented hook for a hand-built window that's actually been shown.</news>
+v0.7.6: add diagnostic log lines (LibTV: overlay.show() invoked / showing N channel row(s) / overlay closed / selected channel X) around the EPG overlay, since two silent-ish failures in a row made it hard to tell "RunScript never fired" apart from "it ran fine but nothing visible happened" from kodi.log alone. No behavior change.</news>
     </extension>
 </addon>

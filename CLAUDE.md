@@ -350,8 +350,22 @@ see `docs/live-testing.md` for the checklist.
   since the repo has no image assets yet), drawn via `xbmcgui.ControlImage`
   behind the list, plus explicit `textColor`/`selectedColor` on the
   `ControlList` so rows and the focused row are legible regardless of
-  skin/video content behind them. Not yet live-verified whether this
-  actually makes the overlay visible — see `docs/live-testing.md` §5a.
+  skin/video content behind them.
+- **Fourth live pass: the background now rendered, but the list still
+  showed no text/rows at all** — confirming the background fix worked but
+  exposing a second, independent problem. Two suspects, both fixed at
+  once rather than tested one at a time (this loop has cost a live
+  round-trip per bug so far): (1) `ControlList` had no explicit `font` —
+  a code-only list with none specified may render its background/focus
+  behavior but no text at all, since there's no skin to inherit a default
+  from; now set to `'font12'`, present in effectively every skin's
+  `Font.xml`. (2) `ListItem(label=..., label2=...)` was used, but a bare
+  `ControlList` has no skin XML defining *where* `label2` would even
+  draw — there is no default second-label layout to fall back to. Both
+  Now/Next fields are combined into a single `label` string
+  (`overlay._row_label`) instead. **Not yet live-verified** whether either
+  or both of these were the actual cause — see `docs/live-testing.md`
+  §5a.
 
 ## Known gaps (as of 2026-07)
 

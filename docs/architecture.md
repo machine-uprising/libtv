@@ -406,7 +406,12 @@ Two ways to trigger it, both reaching the same `context.py`/`overlay.show()`:
   focused one stay legible over whatever video is playing behind the
   overlay (**live-verified finding**: without this, the window opened and
   blocked in `doModal()` exactly as expected, but rendered nothing visible
-  at all — see §11).
+  at all — see §11). The `ControlList` also sets an explicit `font`
+  (`'font12'`, present in effectively every skin) and uses a single
+  combined `label` per row rather than `label`/`label2` — a bare,
+  no-skin `ControlList` has no defined layout for a second label at all,
+  and live testing found no text rendered without an explicit font either
+  (`overlay._row_label` builds the one combined string).
 - **Data**: strictly **read-only** against the persisted `schedule.json` —
   `generator.load_schedule()` plus a new pure lookup,
   `schedule.find_now_and_next(data, channel_id, now_epoch)`, returning
@@ -570,18 +575,20 @@ default in `tests/conftest.py` `SETTINGS`.
   (`keymap.apply_from_settings`) are now **confirmed working** live. What's
   still open: whether a code-only `WindowDialog` drawn over an actively
   playing **PVR** stream renders and behaves correctly — list display,
-  focus/navigation, tune-on-select, close-without-selecting — now that two
-  real bugs are fixed: a construction crash (`ControlList`'s `itemHeight`
-  vs. `_itemHeight` keyword) and a completely invisible window (a
-  code-only `WindowDialog` has no background of its own; opened and
-  blocked in `doModal()` correctly, per the log, but rendered nothing on
-  screen — fixed by drawing `resources/media/overlay_bg.png` behind the
-  list and setting explicit `textColor`/`selectedColor`, see `CLAUDE.md`'s
-  live-verified findings). Every other PVR-specific surprise in this
-  project — `StartOffset` ignored, resolver script termination on channel
-  change — came from PVR streams differing from regular playback, so this
-  is still worth a dedicated check. See `docs/live-testing.md` for the
-  checklist.
+  focus/navigation, tune-on-select, close-without-selecting — now that
+  three real bugs are fixed in sequence: a construction crash
+  (`ControlList`'s `itemHeight` vs. `_itemHeight` keyword), a completely
+  invisible window (no background of its own; fixed by
+  `resources/media/overlay_bg.png` drawn behind the list plus explicit
+  `textColor`/`selectedColor`), and — once the background confirmed the
+  window really was showing — still no visible text or rows, addressed by
+  giving `ControlList` an explicit `font` and combining Now/Next into a
+  single `label` per row rather than `label`/`label2` (see `CLAUDE.md`'s
+  live-verified findings for why both were suspects). Every other
+  PVR-specific surprise in this project — `StartOffset` ignored, resolver
+  script termination on channel change — came from PVR streams differing
+  from regular playback, so this is still worth a dedicated check. See
+  `docs/live-testing.md` for the checklist.
 - Possible future channel sources: per-show channels, smart-playlist-backed
   channels, tag filters, decade-based autotune.
 - `star-rating`/`new`/`xmltv_ns` XMLTV fields (§5) depend on the library

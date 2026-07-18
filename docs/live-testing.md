@@ -313,9 +313,14 @@ code-only `WindowDialog` has no background of its own, and the
 `resources/media/overlay_bg.png` (small solid semi-transparent PNG, the
 add-on's only bundled image asset) drawn behind the list via
 `xbmcgui.ControlImage`, plus explicit `textColor`/`selectedColor` on the
-list. **The overlay's actual rendering/behavior — is it now visible, does
-navigation work, does selecting a row tune the channel — has still not
-been checked.** That's the next thing to verify.
+list. The *next* live pass confirmed the background now renders — but
+**still no text or row content was visible**, isolating a second,
+independent problem. Fixed two suspects at once: `ControlList` had no
+`font` (now `'font12'`), and rows used `label`/`label2` (a bare, no-skin
+list has no defined layout for a second label at all — combined into one
+`label` string via `overlay._row_label`). **Whether the overlay now
+actually shows readable rows, and whether navigation/selection/tuning
+work, has still not been checked.** That's the next thing to verify.
 
 Checklist, using whichever trigger you're testing:
 
