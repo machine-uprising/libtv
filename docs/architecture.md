@@ -396,22 +396,36 @@ Two ways to trigger it, both reaching the same `context.py`/`overlay.show()`:
   is needed and it works the same across platforms.
 
 - **Rendering**: `overlay._EpgOverlay` is a code-only `xbmcgui.WindowDialog`
-  (no skin XML) with one `ControlList` populated from schedule rows — this
-  is what makes it draw over any skin. It is the first custom-rendered
-  window in the add-on. Because a code-only `WindowDialog` has no
-  background of its own, an `xbmcgui.ControlImage` referencing
-  `resources/media/overlay_bg.png` (a small solid semi-transparent PNG —
-  the add-on's only bundled image asset) is drawn behind the list, and the
-  list's `textColor`/`selectedColor` are set explicitly, so rows and the
-  focused one stay legible over whatever video is playing behind the
-  overlay (**live-verified finding**: without this, the window opened and
-  blocked in `doModal()` exactly as expected, but rendered nothing visible
-  at all — see §11). The `ControlList` also sets an explicit `font`
-  (`'font12'`, present in effectively every skin) and uses a single
-  combined `label` per row rather than `label`/`label2` — a bare,
-  no-skin `ControlList` has no defined layout for a second label at all,
-  and live testing found no text rendered without an explicit font either
-  (`overlay._row_label` builds the one combined string).
+  (no skin XML) — the first custom-rendered window in the add-on. A
+  background (`xbmcgui.ControlImage` over `resources/media/overlay_bg.png`,
+  a small solid semi-transparent PNG and the add-on's only bundled image
+  asset) is drawn first so it sits behind everything else, since a
+  code-only `WindowDialog` has no background of its own.
+  - **Rows are plain `xbmcgui.ControlLabel`s, one per channel, not an
+    `xbmcgui.ControlList`.** `ControlList` was tried first and went through
+    three live fix attempts (item-height keyword, focus timing,
+    background/colors, font/single-label) that each addressed a real bug
+    but still ended with **zero visual output of any kind — not even a
+    focus rectangle** once the background itself was confirmed visible.
+    That total absence of feedback, even for the control's own native
+    focus indication, pointed at the no-skin `ControlList` item-rendering
+    path itself rather than any one parameter — so rendering was rebuilt
+    on `ControlLabel`, the most primitive text-drawing control Kodi has,
+    removing that whole axis of uncertainty. Each label gets an explicit
+    `font`/`textColor` (no skin to fall back to) and a fixed row height
+    computed to fit every channel in the background's bounds without
+    needing scrolling/paging.
+  - **Navigation and the current-row highlight are hand-rolled, not
+    native.** `_EpgOverlay.onAction` handles `ACTION_MOVE_UP`/
+    `ACTION_MOVE_DOWN` itself, moving an internal `_cursor` index and
+    recoloring the affected labels' `textColor` via `setLabel(...)`
+    (`_FOCUS_COLOR` for the current row) — no `xbmcgui` control focus or
+    `setFocus()` is used at all, since `ControlLabel`s aren't focusable in
+    the first place and the goal was to depend on as little
+    native-rendering behavior as possible after `ControlList`'s failure.
+    `ACTION_SELECT_ITEM`/`ACTION_MOUSE_LEFT_CLICK` resolve the current
+    cursor position to a channel id and close the window;
+    `ACTION_PREVIOUS_MENU`/`ACTION_NAV_BACK` close without selecting.
 - **Data**: strictly **read-only** against the persisted `schedule.json` —
   `generator.load_schedule()` plus a new pure lookup,
   `schedule.find_now_and_next(data, channel_id, now_epoch)`, returning
@@ -572,23 +586,22 @@ default in `tests/conftest.py` `SETTINGS`.
   cause unknown). The `xbmc.python.script`/`RunScript(plugin.video.libtv)`
   keymap trigger (with the `FullscreenLiveTV` fix) and the settings-driven
   write of `special://profile/keymaps/libtv.xml`
-  (`keymap.apply_from_settings`) are now **confirmed working** live. What's
-  still open: whether a code-only `WindowDialog` drawn over an actively
-  playing **PVR** stream renders and behaves correctly — list display,
-  focus/navigation, tune-on-select, close-without-selecting — now that
-  three real bugs are fixed in sequence: a construction crash
-  (`ControlList`'s `itemHeight` vs. `_itemHeight` keyword), a completely
-  invisible window (no background of its own; fixed by
-  `resources/media/overlay_bg.png` drawn behind the list plus explicit
-  `textColor`/`selectedColor`), and — once the background confirmed the
-  window really was showing — still no visible text or rows, addressed by
-  giving `ControlList` an explicit `font` and combining Now/Next into a
-  single `label` per row rather than `label`/`label2` (see `CLAUDE.md`'s
-  live-verified findings for why both were suspects). Every other
-  PVR-specific surprise in this project — `StartOffset` ignored, resolver
-  script termination on channel change — came from PVR streams differing
-  from regular playback, so this is still worth a dedicated check. See
-  `docs/live-testing.md` for the checklist.
+  (`keymap.apply_from_settings`) are **confirmed working** live — the
+  overlay reliably opens. Getting it to render anything cost several live
+  round-trips: a construction crash (`ControlList`'s `itemHeight` vs.
+  `_itemHeight` keyword), a completely invisible window (no background of
+  its own), then — even with a confirmed-visible background —
+  `ControlList` still produced **zero** visible output, not even its own
+  focus rectangle, across further attempts (font, colors, single vs. dual
+  label). That total silence pointed at the no-skin `ControlList`
+  rendering path itself, so rendering was rebuilt on plain
+  `ControlLabel`s with hand-rolled navigation/highlighting instead (see
+  §6a) — **not yet live-verified**. Every other PVR-specific surprise in
+  this project — `StartOffset` ignored, resolver script termination on
+  channel change — came from PVR streams differing from regular playback,
+  so whether the overlay behaves correctly over an actively playing PVR
+  stream specifically is still worth a dedicated check even once rendering
+  itself is confirmed. See `docs/live-testing.md` for the checklist.
 - Possible future channel sources: per-show channels, smart-playlist-backed
   channels, tag filters, decade-based autotune.
 - `star-rating`/`new`/`xmltv_ns` XMLTV fields (§5) depend on the library

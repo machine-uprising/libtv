@@ -318,9 +318,20 @@ list. The *next* live pass confirmed the background now renders — but
 independent problem. Fixed two suspects at once: `ControlList` had no
 `font` (now `'font12'`), and rows used `label`/`label2` (a bare, no-skin
 list has no defined layout for a second label at all — combined into one
-`label` string via `overlay._row_label`). **Whether the overlay now
-actually shows readable rows, and whether navigation/selection/tuning
-work, has still not been checked.** That's the next thing to verify.
+`label` string via `overlay._row_label`). The *next* live pass showed the
+background rendering correctly with **still absolutely nothing else
+visible — not even a focus rectangle or row divider** — across four fix
+attempts targeting different `ControlList` parameters, pointing at the
+no-skin `ControlList` item-rendering path itself rather than any one
+keyword. **Fix**: rendering rebuilt on plain `xbmcgui.ControlLabel`s (one
+per channel row) with hand-rolled up/down navigation and highlight
+(`_EpgOverlay.onAction` tracks its own cursor and recolors labels
+directly) instead of any native list/button focus behavior. **Whether the
+overlay now actually shows readable rows, and whether navigation/
+selection/tuning work, has still not been checked.** That's the next thing
+to verify. If this *still* shows nothing, try confirming a single
+`ControlLabel` renders in isolation before suspecting anything else — the
+background (`ControlImage`) is the one piece confirmed working so far.
 
 Checklist, using whichever trigger you're testing:
 

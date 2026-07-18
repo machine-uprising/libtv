@@ -363,9 +363,29 @@ see `docs/live-testing.md` for the checklist.
   `ControlList` has no skin XML defining *where* `label2` would even
   draw — there is no default second-label layout to fall back to. Both
   Now/Next fields are combined into a single `label` string
-  (`overlay._row_label`) instead. **Not yet live-verified** whether either
-  or both of these were the actual cause — see `docs/live-testing.md`
-  §5a.
+  (`overlay._row_label`) instead.
+- **Fifth live pass: font + single-label change made no difference —
+  still solid black, absolutely nothing visible, not even a focus
+  rectangle or row divider.** That total absence of *any* rendering
+  output from `ControlList` (confirmed via a direct question: "does even
+  a highlight bar show?" — no) — across four fix attempts targeting
+  different specific parameters — pointed at the no-skin `ControlList`
+  item-rendering path itself being the problem, not any one keyword
+  argument. **Fix**: rebuilt rendering on plain `xbmcgui.ControlLabel`s
+  (the most primitive text-drawing control Kodi has) — one per channel
+  row, fixed height computed to fit all rows in the background — with
+  navigation and the current-row highlight entirely hand-rolled in
+  `_EpgOverlay.onAction` (tracking a `_cursor` index, recoloring labels'
+  `textColor` directly via `setLabel(...)`) rather than relying on any
+  native list/button focus behavior. No `setFocus()`/`onInit()` at all
+  anymore — `ControlLabel`s aren't focusable, and the goal was to depend
+  on as little native rendering as possible after `ControlList`'s
+  complete failure. **Not yet live-verified.** See `docs/live-testing.md`
+  §5a. If this *also* renders nothing, the next suspect is the window
+  itself / `ControlImage` background rendering path (already confirmed
+  working, so unlikely) or something specific to this Kodi/skin
+  combination that goes beyond per-control fixes — worth trying a single
+  `ControlLabel` in isolation (no list of rows) to narrow further.
 
 ## Known gaps (as of 2026-07)
 
@@ -385,12 +405,15 @@ see `docs/live-testing.md` for the checklist.
   `docs/architecture.md` §6a) is unit-tested for its pure
   `schedule.find_now_and_next` lookup and `keymap.py`'s key
   validation/XML-rendering/write-remove logic — the `WindowDialog`/
-  `ControlList` rendering cannot be faked meaningfully. The
+  `ControlLabel` rendering cannot be faked meaningfully. The
   `kodi.context.item` trigger is **confirmed not to work** (see "Live-
   verified findings" above); the `RunScript(plugin.video.libtv)`/keymap
-  trigger (with the `FullscreenLiveTV` fix) is now **confirmed to fire**.
-  Still open: whether the overlay actually **renders and behaves
-  correctly** once construction no longer crashes (list displays, focus/
-  navigation works, selecting a row tunes the channel, closing without
-  selecting leaves playback alone) drawn over an actively playing **PVR**
-  stream specifically. See `docs/live-testing.md` §5a.
+  trigger (with the `FullscreenLiveTV` fix) is **confirmed to fire** and
+  reliably opens the window. Still open: whether the rebuilt
+  `ControlLabel`-based rendering (see "Live-verified findings" — this
+  replaced an `xbmcgui.ControlList` that rendered nothing at all across
+  four fix attempts) actually displays legible rows, whether the
+  hand-rolled up/down navigation and highlight work, whether selecting a
+  row tunes the channel, and whether closing without selecting leaves
+  playback alone — drawn over an actively playing **PVR** stream
+  specifically. See `docs/live-testing.md` §5a.
