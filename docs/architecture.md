@@ -42,11 +42,11 @@ inputs for Kodi's native PVR stack and resolves streams on demand:
 | `addon.xml` | Manifest. Four extension points: `xbmc.python.pluginsource` → `default.py`, `xbmc.service` → `service.py`, `xbmc.python.script` → `context.py` (makes `RunScript(plugin.video.libtv)` work from a keymap), `kodi.context.item` → `context.py` (unreliable in testing, §6a). |
 | `default.py`, `service.py`, `context.py` | Thin entry shims (≤15 lines each, enforced by kodi-addon-checker). Add `resources/lib` to `sys.path` and delegate. `context.py` is invoked either via `RunScript` or Kodi's context-menu calling convention — neither passes a `plugin://` argv triple, so it never goes through `plugin.run`. |
 | `resources/lib/libtv/schedule.py` | **Pure.** Schedule building and lookup. No Kodi imports. |
-| `resources/lib/libtv/writers.py` | **Pure.** Renders M3U and XMLTV strings from a schedule dict. |
+| `resources/lib/libtv/writers.py` | **Pure.** Renders M3U and XMLTV strings from a schedule dict, and renders/parses `pvr.iptvsimple` instance-settings XML (`render_iptv_instance_settings`/`parse_iptv_instance_settings`, §7). |
 | `resources/lib/libtv/channels.py` | **Pure.** Channel-lineup configuration: `channels.json` load/save, default lineup, id allocation, reorder, JSON-RPC filter building (`build_filter`), and per-channel selection-order building (`build_sort`). |
 | `resources/lib/libtv/library.py` | Kodi JSON-RPC library queries (`VideoLibrary.GetMovies` / `GetEpisodes`, filtered and sorted per channel definition) plus genre/studio pickers for the management UI. Resolves each item's runtime, falling back to stream-details duration then an observed-playback-duration cache (§4); for `order: random` also does the day-stable selection (§4). |
-| `resources/lib/libtv/generator.py` | Orchestration: fetch → schedule → write all artifacts (`regenerate`), or patch just the persisted schedule's channel metadata without a library refetch (`relabel_schedule`, §3). Owns the profile directory, the pending-seek handoff file, the version-stamped observed-runtime cache, and the PVR refresh (`refresh_pvr`). |
-| `resources/lib/libtv/plugin.py` | Plugin routing: menu, build action, the setup guide and IPTV Simple setup-paths info dialogs (`show_setup_guide`, `show_iptv_setup_info`, §7), and the stream resolver (`play`), including its schedule-miss loop guard (§6). |
+| `resources/lib/libtv/generator.py` | Orchestration: fetch → schedule → write all artifacts (`regenerate`), or patch just the persisted schedule's channel metadata without a library refetch (`relabel_schedule`, §3). Owns the profile directory, the pending-seek handoff file, the version-stamped observed-runtime cache, the PVR refresh (`refresh_pvr`), and the IPTV Simple instance auto-configuration (`configure_iptv_simple`, §7). |
+| `resources/lib/libtv/plugin.py` | Plugin routing: menu, build action, the setup guide, IPTV Simple setup-paths, and auto-configure info dialogs (`show_setup_guide`, `show_iptv_setup_info`, `auto_configure_iptv_simple`, §7), and the stream resolver (`play`), including its schedule-miss loop guard (§6). |
 | `resources/lib/libtv/manage.py` | Dialog-driven channel management UI (add/rename/filter/order/reorder/delete) plus genre- and studio-based channel autotune (§3). |
 | `resources/lib/libtv/daemon.py` | Service loop (periodic regeneration, self-healing PVR-refresh retry) + `JoinInProgressPlayer` (the seek half of join-in-progress; also records observed durations). |
 | `resources/lib/libtv/overlay.py` | In-playback EPG overlay (§6a): a code-only `xbmcgui.WindowDialog` listing every channel's Now/Next, read-only against `schedule.json`. |
@@ -528,36 +528,89 @@ without a Kodi restart. Guards, all of which make it return `False`:
 and the service loop — **never from the stream resolver**: `plugin.play` also
 regenerates on a schedule miss, and a toggle mid-tune would abort the tune.
 
-**IPTV Simple's own M3U/XMLTV paths cannot be configured by this add-on.**
-The user must still open IPTV Simple's settings and enter
-`generator.m3u_path()` / `generator.xmltv_path()` manually — this was
-investigated and found infeasible on Kodi 20/21, not merely unimplemented:
-the JSON-RPC `Addons.*` namespace has exactly four methods
-(`GetAddons`/`GetAddonDetails`/`SetAddonEnabled`/`ExecuteAddon`), none of
-which read or write another add-on's settings or manage its PVR-client
-*instances*; since Kodi 20 (Nexus), `pvr.iptvsimple` uses a multi-instance
-model where a new instance's settings file doesn't exist until created
-through IPTV Simple's own GUI ("Configure → Add add-on configuration") —
-there is no file-only or JSON-RPC-only way to register one from outside; and
-Kodi core issue `xbmc/xbmc#22779` confirms even the Python `xbmcaddon` API
-can't manage instance settings. PseudoTV Live previously auto-wrote IPTV
-Simple's settings directly, but that broke when Nexus's multi-instance model
-shipped, and its maintainer now requires the same manual configuration this
-add-on does. Given that ceiling, `plugin.show_iptv_setup_info()` (wired to
-the `show_iptv_paths` action, reachable from both the add-on's main menu and
-a settings button, §8) shows the two paths in a dialog so the user only has
-to copy/paste them rather than locate the profile directory by hand — it
-does not, and cannot, eliminate the manual entry step.
+**IPTV Simple can be auto-configured, but only via an unofficial technique
+— there is no supported Kodi API for it.** The JSON-RPC `Addons.*`
+namespace has exactly four methods (`GetAddons`/`GetAddonDetails`/
+`SetAddonEnabled`/`ExecuteAddon`), none of which read or write another
+add-on's settings, and Kodi core issue `xbmc/xbmc#22779` confirms even the
+Python `xbmcaddon` API can't manage a multi-instance add-on's per-instance
+settings. An **earlier version of this document claimed auto-configuration
+was infeasible** based on a secondhand forum thread about an old PseudoTV
+Live hack breaking under Kodi 20's multi-instance model — that claim was
+wrong. Reading PseudoTV Live's actual current source (both its release and
+`nightly` branches) showed it still auto-configures `pvr.iptvsimple`
+today, by writing an instance-settings file directly rather than going
+through any addon-facing API:
+
+- Since Kodi 20 (Nexus), `pvr.iptvsimple` (and any multi-instance-capable
+  add-on) is configured per-instance via
+  `special://profile/addon_data/<addon-id>/instance-settings-<id>.xml`.
+  This file's format — `<settings version="N"><setting id="x"
+  default="true">value</setting>...</settings>` — is not add-on-specific:
+  it's Kodi core's own generic settings serialization
+  (`CSettingsValueXmlSerializer`), the same shape used for every add-on's
+  main `settings.xml`. `kodi_addon_instance_name`/
+  `kodi_addon_instance_enabled` are two more ordinary `<setting>` entries
+  in that same file (auto-injected into any multi-instance add-on's schema
+  by Kodi core's `CAddonSettings::AddInstanceSettings`), not a separate
+  registration step or database write — so a hand-written file with the
+  right `<setting>` entries is indistinguishable, to Kodi, from one its own
+  GUI wrote.
+- `generator.configure_iptv_simple()` builds this file via
+  `writers.render_iptv_instance_settings()` (a pure function — construct
+  `{setting_id: value}`, get back the XML string; `writers.
+  parse_iptv_instance_settings()` is the inverse, used for the idempotency
+  check below) with the fields `pvr.iptvsimple`'s own
+  `resources/instance-settings.xml` schema defines for a local-path M3U/EPG
+  source: `kodi_addon_instance_name`, `kodi_addon_instance_enabled`,
+  `m3uPathType`/`epgPathType` (`"0"` = local path, `"1"` = remote URL — we
+  always use `"0"`, pointing straight at `generator.m3u_path()`/
+  `xmltv_path()`, since LibTV writes local files and runs no HTTP server),
+  `m3uPath`/`epgPath`, and `m3uCache`/`epgCache`.
+- The instance id is `zlib.crc32("LibTV") % 2**31` (`generator.
+  _pvr_instance_id()`) — a fixed, name-derived id (the same technique
+  PseudoTV Live uses) so the same file is always found and overwritten
+  again on the next call, rather than accumulating duplicates.
+- After writing, Kodi still needs to notice the new/changed instance file —
+  `configure_iptv_simple()` reuses the exact same `Addons.SetAddonEnabled`
+  off/on toggle `refresh_pvr()` already uses (factored into a shared
+  `_toggle_pvr_client()`), which forces the PVR manager to reload the
+  add-on and, with it, discover the instance file.
+- **Idempotency comes before the playback guard, deliberately**:
+  `configure_iptv_simple()` first parses whatever's already on disk
+  (`parse_iptv_instance_settings`) and compares it to the desired settings
+  dict; a no-op call (nothing actually needs to change) returns
+  `"unchanged"` immediately without ever checking `Player().isPlaying()` —
+  only an actual write is guarded against playback (same "toggling
+  mid-playback kills the stream" invariant `refresh_pvr()` already
+  enforces). Returns one of `"not_installed"`, `"playing"`, `"unchanged"`,
+  `"configured"`.
+- This is **not yet live-verified** and is deliberately **not** wired into
+  the automatic background regeneration loop (`daemon.run()`) or the manual
+  build action (`plugin.build`) — unlike `refresh_pvr()`, which both call
+  automatically, `configure_iptv_simple()` only runs when the user presses
+  the dedicated `auto_configure_iptv` action (main menu, and the first
+  settings group). It's a real, working technique per another maintained
+  add-on's current production code, but LibTV writing into a *different*
+  add-on's own profile directory is a materially higher-risk operation than
+  anything else this add-on does, and this project's own history (the EPG
+  overlay, §6a) is full of things that looked correct on paper and needed
+  several live round-trips to actually work — auto-configuration earns a
+  spot in the automatic path only after it's been proven live, not before.
+- `plugin.show_iptv_setup_info()` (the `show_iptv_paths` action) remains as
+  the manual fallback — showing the two paths in a dialog to copy/paste by
+  hand — for when auto-configuration doesn't work on a given setup, or
+  before it's been live-verified at all.
 
 `plugin.show_setup_guide()` (the `setup_guide` action, reachable from both
 the main menu — first item — and a settings button that is also the first
 group in the settings screen, §8) is a broader, numbered walkthrough of the
 whole first-run flow (scan the library, optionally customize channels,
-rebuild, install/enable IPTV Simple, paste in the two paths, open the TV
-section, optionally bind the EPG overlay hotkey) rather than just the two
-paths — it exists as a single, prominent starting point for a brand-new
-install, with `show_iptv_setup_info` remaining as the narrower dialog for
-re-finding just the paths later.
+rebuild, install/enable IPTV Simple, run auto-configure or paste in the two
+paths by hand, open the TV section, optionally bind the EPG overlay hotkey)
+— a single, prominent starting point for a brand-new install, with
+`show_iptv_setup_info` remaining as the narrower dialog for re-finding just
+the paths later.
 
 **Self-healing refresh retry**: when a regen cycle's `refresh_pvr()` is
 skipped specifically because something was playing, `daemon.run()` doesn't
@@ -576,6 +629,7 @@ transient.)
 | id | type | default | effect |
 | --- | --- | --- | --- |
 | `setup_guide` | action | — | `RunPlugin(…?action=setup_guide)` — first-run walkthrough dialog (§7); first group in the settings screen. |
+| `auto_configure_iptv` | action | — | `RunPlugin(…?action=auto_configure_iptv)` — writes/refreshes a dedicated "LibTV" `pvr.iptvsimple` instance via `generator.configure_iptv_simple()` (§7); an unofficial technique, not yet live-verified. |
 | `max_items` | integer 10–1000 | 150 | Cap on library items pulled per channel (§3/§4 `order` controls *which* items land within the cap). |
 | `shuffle` | boolean | true | Deterministic per-day reshuffle of each channel's already-selected items, on top of the per-channel `order`. |
 | `epg_hours` | integer 6–72 | 24 | Guide horizon: schedule covers `now + epg_hours`. |
@@ -683,6 +737,18 @@ default in `tests/conftest.py` `SETTINGS`.
   use a standard `xbmcgui.Dialog().textviewer()`, not a hand-built window
   like the EPG overlay, so they carry little of that feature's risk, but
   should still get one live smoke test each (see `docs/live-testing.md`).
+- **`generator.configure_iptv_simple()` (§7) — IPTV Simple auto-configuration
+  — is unit-tested (XML round-trip, idempotency, the playback guard, the
+  installed/enabled check) but carries real, un-mitigated risk until it's
+  live-verified**: it writes into `pvr.iptvsimple`'s own profile directory
+  using an unofficial technique (no supported Kodi API covers this), so a
+  wrong assumption about the instance-settings file format or Kodi's
+  reload-on-toggle behavior could leave that add-on in a broken or
+  half-configured state, not just LibTV's own. This is exactly why it's
+  gated behind an explicit `auto_configure_iptv` action rather than wired
+  into the automatic regeneration loop or the manual build action — see
+  `docs/live-testing.md` for the checklist to clear before considering that
+  promotion.
 - Possible future channel sources: per-show channels, smart-playlist-backed
   channels, tag filters, decade-based autotune.
 - `star-rating`/`new`/`xmltv_ns` XMLTV fields (§5) depend on the library

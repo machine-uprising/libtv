@@ -31,6 +31,7 @@ _SCHEDULE_MISS_REGEN_GUARD_SECONDS = 5
 def main_menu(base_url, handle):
     for label, action, is_folder in [
         ("Setup guide", "setup_guide", False),
+        ("Auto-configure IPTV Simple Client", "auto_configure_iptv", False),
         ("Manage channels", "channels", True),
         ("Rebuild channels now", "build", False),
         ("IPTV Simple Client setup paths", "show_iptv_paths", False),
@@ -80,12 +81,13 @@ def show_setup_guide():
         "4. Install and enable \"PVR IPTV Simple Client\" from Kodi's\n"
         "   add-on repository (Add-ons -> Install from repository -> \n"
         "   PVR clients).\n\n"
-        "5. Open IPTV Simple Client's own settings and paste in the two\n"
-        "   paths above:\n"
+        "5. Press \"Auto-configure IPTV Simple Client\" to have LibTV write\n"
+        "   its own IPTV Simple instance pointed at the paths above. This\n"
+        "   uses an unofficial technique (Kodi has no supported API for\n"
+        "   this) — if it doesn't work, use \"IPTV Simple Client setup\n"
+        "   paths\" to paste the two paths in by hand instead:\n"
         "   General -> M3U Play List (Local Path)\n"
-        "   EPG Settings -> XMLTV URL (Local Path)\n"
-        "   (\"IPTV Simple Client setup paths\" shows just these two paths\n"
-        "   again later, if you need them a second time.)\n\n"
+        "   EPG Settings -> XMLTV URL (Local Path)\n\n"
         "6. Open Kodi's TV section — your channels should appear with a\n"
         "   full guide.\n\n"
         "7. (Optional) Set a hotkey under \"In-playback guide hotkey\" to\n"
@@ -96,9 +98,7 @@ def show_setup_guide():
 
 def show_iptv_setup_info():
     """Show the M3U/XMLTV paths the user must paste into IPTV Simple's own
-    settings — Kodi has no API to configure a PVR client instance itself
-    (see docs/architecture.md §7), so this only saves the user from hunting
-    for the paths, not the manual entry step."""
+    settings, as a manual fallback for auto_configure_iptv_simple()."""
     m3u, xmltv = generator.m3u_path(), generator.xmltv_path()
     message = (
         "Enter these paths into PVR IPTV Simple Client's settings:\n\n"
@@ -106,6 +106,27 @@ def show_iptv_setup_info():
         f"EPG Settings -> XMLTV URL (Local Path):\n{xmltv}"
     )
     xbmcgui.Dialog().textviewer("LibTV - IPTV Simple Client setup", message)
+
+
+_IPTV_CONFIGURE_MESSAGES = {
+    "not_installed": "Install and enable PVR IPTV Simple Client first",
+    "playing": "Can't configure while something is playing",
+    "unchanged": "IPTV Simple Client is already configured for LibTV",
+    "configured": "IPTV Simple Client configured — restart Kodi if the guide doesn't appear",
+}
+
+
+def auto_configure_iptv_simple():
+    """Write/refresh a dedicated IPTV Simple instance for LibTV and reload
+    it — see `generator.configure_iptv_simple` for the mechanism and why
+    it's an unofficial technique rather than a supported Kodi API call."""
+    outcome = generator.configure_iptv_simple()
+    icon = (
+        xbmcgui.NOTIFICATION_WARNING
+        if outcome in ("not_installed", "playing")
+        else xbmcgui.NOTIFICATION_INFO
+    )
+    xbmcgui.Dialog().notification("LibTV", _IPTV_CONFIGURE_MESSAGES[outcome], icon, 5000)
 
 
 def play(handle, channel_id):
@@ -169,6 +190,8 @@ def run(argv):
         show_iptv_setup_info()
     elif action == "setup_guide":
         show_setup_guide()
+    elif action == "auto_configure_iptv":
+        auto_configure_iptv_simple()
     elif action in ("channels", "channel_add", "channel_options", "autotune", "autotune_studio"):
         # Imported lazily: manage imports plugin (for build), so a top-level
         # import here would be circular.

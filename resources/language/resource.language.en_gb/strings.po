@@ -92,3 +92,11 @@ msgstr ""
 msgctxt "#32120"
 msgid "Setup guide"
 msgstr ""
+
+msgctxt "#32121"
+msgid "Auto-configure IPTV Simple Client"
+msgstr ""
+
+msgctxt "#32122"
+msgid "Writes a dedicated LibTV instance directly into IPTV Simple Client's own configuration and reloads it. This is an unofficial technique (Kodi has no supported API for one add-on to configure another's PVR-client instances) - if it doesn't work, use \"IPTV Simple Client setup paths\" to configure it by hand instead."
+msgstr ""

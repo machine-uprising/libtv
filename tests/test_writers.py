@@ -102,3 +102,36 @@ def test_render_xmltv_structure():
     assert nums[0].text == "0.0."
     assert nums[1].text == "S01E01"
     assert episode.find("new") is None, "playcount=1 (watched) must not get a <new/> tag"
+
+
+def test_iptv_instance_settings_round_trips():
+    settings = {
+        "kodi_addon_instance_name": "LibTV",
+        "kodi_addon_instance_enabled": "true",
+        "m3uPathType": "0",
+        "m3uPath": "/profile/channels.m3u",
+        "m3uCache": "false",
+        "epgPathType": "0",
+        "epgPath": "/profile/guide.xmltv",
+        "epgCache": "true",
+    }
+
+    xml_text = writers.render_iptv_instance_settings(settings)
+
+    root = ET.fromstring(xml_text)
+    assert root.tag == "settings"
+    assert root.get("version") == "2"
+    assert all(el.get("default") == "true" for el in root.findall("setting"))
+    assert writers.parse_iptv_instance_settings(xml_text) == settings
+
+
+def test_iptv_instance_settings_empty_value_round_trips_as_self_closing():
+    xml_text = writers.render_iptv_instance_settings({"m3uPath": ""})
+    assert "<setting" in xml_text and "/>" in xml_text
+    assert writers.parse_iptv_instance_settings(xml_text) == {"m3uPath": ""}
+
+
+def test_parse_iptv_instance_settings_handles_missing_or_corrupt_input():
+    assert writers.parse_iptv_instance_settings("") == {}
+    assert writers.parse_iptv_instance_settings("   ") == {}
+    assert writers.parse_iptv_instance_settings("not xml") == {}

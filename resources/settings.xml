@@ -8,6 +8,11 @@
                     <data>RunPlugin(plugin://plugin.video.libtv/?action=setup_guide)</data>
                     <control type="button" format="action"/>
                 </setting>
+                <setting id="auto_configure_iptv" type="action" label="32121" help="32122">
+                    <level>0</level>
+                    <data>RunPlugin(plugin://plugin.video.libtv/?action=auto_configure_iptv)</data>
+                    <control type="button" format="action"/>
+                </setting>
             </group>
             <group id="1" label="32101">
                 <setting id="max_items" type="integer" label="32102" help="">

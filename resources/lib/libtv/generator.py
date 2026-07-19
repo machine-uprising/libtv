@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 import time
+import zlib
 
 import xbmc
 import xbmcaddon
@@ -23,6 +24,10 @@ PENDING_SEEK_MAX_AGE = 120
 
 # The PVR client that consumes our M3U/XMLTV output.
 PVR_CLIENT = "pvr.iptvsimple"
+
+# Name of the pvr.iptvsimple instance configure_iptv_simple() owns; also the
+# seed for that instance's id, so it's always found at the same path again.
+PVR_INSTANCE_NAME = "LibTV"
 
 
 def profile_dir():
@@ -156,6 +161,20 @@ def relabel_schedule(definitions):
     return data
 
 
+def _pvr_client_enabled():
+    details = library.json_rpc(
+        "Addons.GetAddonDetails", {"addonid": PVR_CLIENT, "properties": ["enabled"]}
+    )
+    return bool(details.get("addon", {}).get("enabled"))
+
+
+def _toggle_pvr_client():
+    library.json_rpc("Addons.SetAddonEnabled", {"addonid": PVR_CLIENT, "enabled": False})
+    xbmc.sleep(500)
+    library.json_rpc("Addons.SetAddonEnabled", {"addonid": PVR_CLIENT, "enabled": True})
+    xbmc.log("LibTV: toggled IPTV Simple to reload channels and guide", xbmc.LOGINFO)
+
+
 def refresh_pvr():
     """Make IPTV Simple reload the regenerated M3U/EPG. Returns True if done.
 
@@ -170,17 +189,84 @@ def refresh_pvr():
     if xbmc.Player().isPlaying():
         xbmc.log("LibTV: playback active, skipping PVR refresh", xbmc.LOGINFO)
         return False
-    details = library.json_rpc(
-        "Addons.GetAddonDetails", {"addonid": PVR_CLIENT, "properties": ["enabled"]}
-    )
-    if not details.get("addon", {}).get("enabled"):
+    if not _pvr_client_enabled():
         xbmc.log(f"LibTV: {PVR_CLIENT} not installed/enabled, skipping PVR refresh", xbmc.LOGINFO)
         return False
-    library.json_rpc("Addons.SetAddonEnabled", {"addonid": PVR_CLIENT, "enabled": False})
-    xbmc.sleep(500)
-    library.json_rpc("Addons.SetAddonEnabled", {"addonid": PVR_CLIENT, "enabled": True})
-    xbmc.log("LibTV: toggled IPTV Simple to reload channels and guide", xbmc.LOGINFO)
+    _toggle_pvr_client()
     return True
+
+
+def _pvr_client_profile_dir():
+    addon = xbmcaddon.Addon(PVR_CLIENT)
+    path = xbmcvfs.translatePath(addon.getAddonInfo("profile"))
+    if not xbmcvfs.exists(path):
+        xbmcvfs.mkdirs(path)
+    return path
+
+
+def _pvr_instance_id():
+    # IPTV Simple's instance ids are 32-bit; a name-derived crc32 gives a
+    # stable id across runs without persisting one anywhere ourselves —
+    # the same technique PseudoTV Live's current code uses.
+    return zlib.crc32(PVR_INSTANCE_NAME.encode("utf-8")) % 2147483648
+
+
+def pvr_instance_settings_path():
+    return os.path.join(
+        _pvr_client_profile_dir(), f"instance-settings-{_pvr_instance_id()}.xml"
+    )
+
+
+def _desired_pvr_instance_settings():
+    return {
+        "kodi_addon_instance_name": PVR_INSTANCE_NAME,
+        "kodi_addon_instance_enabled": "true",
+        "m3uPathType": "0",
+        "m3uPath": m3u_path(),
+        "m3uCache": "false",
+        "epgPathType": "0",
+        "epgPath": xmltv_path(),
+        "epgCache": "true",
+    }
+
+
+def configure_iptv_simple():
+    """Write/refresh a dedicated "LibTV" pvr.iptvsimple instance pointed at
+    our own M3U/XMLTV, and force Kodi to load it.
+
+    Kodi has no supported API for one add-on to manage another's PVR-client
+    instances (see docs/architecture.md §7) — this hand-writes the
+    instance-settings XML Kodi's own multi-instance settings system reads
+    (`writers.render_iptv_instance_settings`), the same technique PseudoTV
+    Live's current code uses, then reuses the same enable/disable JSON-RPC
+    toggle `refresh_pvr()` uses to make the client pick it up.
+
+    Returns "not_installed", "playing", "unchanged", or "configured". The
+    idempotency check (parse what's already on disk and compare) runs
+    before the playback check, so a no-op call never blocks on "something
+    is playing" — only an actual write does.
+    """
+    if not _pvr_client_enabled():
+        return "not_installed"
+
+    desired = _desired_pvr_instance_settings()
+    path = pvr_instance_settings_path()
+    current_text = ""
+    if os.path.exists(path):
+        with open(path, encoding="utf-8") as f:
+            current_text = f.read()
+    if writers.parse_iptv_instance_settings(current_text) == desired:
+        return "unchanged"
+
+    if xbmc.Player().isPlaying():
+        xbmc.log("LibTV: playback active, skipping IPTV Simple auto-configure", xbmc.LOGINFO)
+        return "playing"
+
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(writers.render_iptv_instance_settings(desired))
+    xbmc.log(f"LibTV: wrote {PVR_CLIENT} instance settings to {path}", xbmc.LOGINFO)
+    _toggle_pvr_client()
+    return "configured"
 
 
 def load_schedule():

@@ -103,6 +103,70 @@ def test_refresh_pvr_skips_during_playback(monkeypatch):
     assert _toggle_calls() == []
 
 
+def test_configure_iptv_simple_requires_client_installed(monkeypatch):
+    from libtv import generator
+
+    _with_iptv_simple(monkeypatch, enabled=False)
+    assert generator.configure_iptv_simple() == "not_installed"
+    assert not os.path.exists(generator.pvr_instance_settings_path())
+    assert _toggle_calls() == []
+
+
+def test_configure_iptv_simple_writes_instance_and_toggles(monkeypatch):
+    from libtv import generator, writers
+
+    _with_iptv_simple(monkeypatch)
+    assert generator.configure_iptv_simple() == "configured"
+    assert _toggle_calls() == [False, True]
+
+    with open(generator.pvr_instance_settings_path(), encoding="utf-8") as f:
+        written = writers.parse_iptv_instance_settings(f.read())
+    assert written == {
+        "kodi_addon_instance_name": "LibTV",
+        "kodi_addon_instance_enabled": "true",
+        "m3uPathType": "0",
+        "m3uPath": generator.m3u_path(),
+        "m3uCache": "false",
+        "epgPathType": "0",
+        "epgPath": generator.xmltv_path(),
+        "epgCache": "true",
+    }
+
+
+def test_configure_iptv_simple_is_idempotent(monkeypatch):
+    from libtv import generator
+
+    _with_iptv_simple(monkeypatch)
+    assert generator.configure_iptv_simple() == "configured"
+    conftest.CALLS.clear()
+
+    assert generator.configure_iptv_simple() == "unchanged"
+    assert _toggle_calls() == []
+
+
+def test_configure_iptv_simple_skips_during_playback(monkeypatch):
+    from libtv import generator
+
+    _with_iptv_simple(monkeypatch)
+    conftest.PLAYER.update(playing=True, file="/media/a.mkv")
+
+    assert generator.configure_iptv_simple() == "playing"
+    assert not os.path.exists(generator.pvr_instance_settings_path())
+    assert _toggle_calls() == []
+
+
+def test_configure_iptv_simple_unchanged_never_checks_playback(monkeypatch):
+    """A no-op call must not be blocked by 'something is playing' — only an
+    actual write needs that guard."""
+    from libtv import generator
+
+    _with_iptv_simple(monkeypatch)
+    assert generator.configure_iptv_simple() == "configured"
+
+    conftest.PLAYER.update(playing=True, file="/media/a.mkv")
+    assert generator.configure_iptv_simple() == "unchanged"
+
+
 def test_refresh_pvr_skips_when_client_missing_or_setting_off(monkeypatch):
     from libtv import generator
 
@@ -340,6 +404,7 @@ def test_menu_lists_actions(monkeypatch):
     assert any("action=build" in u for u in urls)
     assert any("action=show_iptv_paths" in u for u in urls)
     assert any("action=setup_guide" in u for u in urls)
+    assert any("action=auto_configure_iptv" in u for u in urls)
     assert any("action=settings" in u for u in urls)
 
 
@@ -369,3 +434,27 @@ def test_setup_guide_action_displays_walkthrough(monkeypatch):
     assert generator.xmltv_path() in message
     assert "PVR IPTV Simple Client" in message
     assert "Manage channels" in message
+
+
+def test_auto_configure_iptv_action_writes_instance_and_notifies(monkeypatch):
+    _with_iptv_simple(monkeypatch)
+
+    _run_plugin(monkeypatch, "?action=auto_configure_iptv")
+
+    assert _toggle_calls() == [False, True]
+    notes = [c for c in conftest.CALLS if c[0] == "xbmcgui.notification"]
+    assert notes == [
+        ("xbmcgui.notification", "LibTV",
+         "IPTV Simple Client configured — restart Kodi if the guide doesn't appear")
+    ]
+
+
+def test_auto_configure_iptv_action_reports_not_installed(monkeypatch):
+    _with_iptv_simple(monkeypatch, enabled=False)
+
+    _run_plugin(monkeypatch, "?action=auto_configure_iptv")
+
+    notes = [c for c in conftest.CALLS if c[0] == "xbmcgui.notification"]
+    assert notes == [
+        ("xbmcgui.notification", "LibTV", "Install and enable PVR IPTV Simple Client first")
+    ]

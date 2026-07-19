@@ -279,6 +279,7 @@ def _reset_kodi_fakes():
         generator.schedule_path(),
         os.path.join(generator.profile_dir(), generator.M3U_NAME),
         os.path.join(generator.profile_dir(), generator.XMLTV_NAME),
+        generator.pvr_instance_settings_path(),
         keymap.path(),
     ):
         try:

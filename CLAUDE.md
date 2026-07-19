@@ -53,14 +53,17 @@ work through its checklist — it maps which document owns what.
     M3U/XMLTV/schedule.json (`regenerate`, full library fetch) or patch just
     the schedule's channel metadata in place without a fetch
     (`relabel_schedule` — the management UI's diff-driven invalidation, see
-    `docs/architecture.md` §3), PVR refresh (`refresh_pvr`), pending-seek and
-    observed-runtime cache persistence
+    `docs/architecture.md` §3), PVR refresh (`refresh_pvr`), IPTV Simple
+    instance auto-configuration (`configure_iptv_simple` — an unofficial
+    technique, not yet live-verified, see the hard-constraints note below),
+    pending-seek and observed-runtime cache persistence
   - `plugin.py` — menu + stream resolver (`play` = the linear-TV core),
     including a schedule-miss loop guard (a `Window(10000)` property rate-
-    limiting forced regenerations); also two info dialogs: a first-run
-    `setup_guide` walkthrough and `show_iptv_setup_info` (just the M3U/XMLTV
-    paths to paste into IPTV Simple's settings) — auto-configuring IPTV
-    Simple itself is not possible, see "Live-verified findings" below
+    limiting forced regenerations); also three info/action dialogs: a
+    first-run `setup_guide` walkthrough, `auto_configure_iptv_simple` (real
+    auto-configuration of IPTV Simple, via `generator.configure_iptv_simple`),
+    and `show_iptv_setup_info` (the manual fallback — just the M3U/XMLTV
+    paths to paste into IPTV Simple's settings by hand)
   - `manage.py` — dialog-driven channel management UI (with a match-count
     preview before saving a channel's filters) + genre- and studio-based
     autotune
@@ -229,21 +232,34 @@ encouraged for diagnosis.
 - For install-from-zip to work, the top-level folder inside the zip must equal
   the add-on id (`plugin.video.libtv`) — hence the `--prefix` in the build
   command; the repo directory name (`libtv`) doesn't matter.
-- **IPTV Simple Client cannot be auto-configured from LibTV — researched and
-  confirmed infeasible, don't re-attempt.** The JSON-RPC `Addons.*`
-  namespace has exactly four methods (`GetAddons`, `GetAddonDetails`,
-  `SetAddonEnabled`, `ExecuteAddon`); there is no `SetAddonSettings` or any
-  instance-management call. Since Kodi 20 (Nexus), `pvr.iptvsimple` uses a
-  multi-instance model where a new instance's settings file doesn't exist
-  until created through its own GUI ("Configure → Add add-on
-  configuration") — there's no file-only or JSON-RPC-only way to register
-  one from outside, and Kodi core issue `xbmc/xbmc#22779` confirms even the
-  Python `xbmcaddon` API can't manage instance settings. PseudoTV Live tried
-  auto-writing IPTV Simple's settings directly and it broke when the
-  multi-instance model shipped; its maintainer now requires manual
-  configuration too. The only shippable mitigation is showing the user the
-  exact paths to paste in (`plugin.show_iptv_setup_info`, `show_iptv_paths`
-  action, `docs/architecture.md` §7) — not eliminating the manual step.
+- **IPTV Simple Client CAN be auto-configured from LibTV, but only via an
+  unofficial technique — there is no supported Kodi API for it.** An
+  earlier version of this note claimed auto-configuration was "researched
+  and confirmed infeasible" based on a secondhand forum thread about an old
+  PseudoTV Live hack breaking under Kodi 20's multi-instance model. **That
+  claim was wrong** — reading PseudoTV Live's actual current source (both
+  its release and `nightly` branches) showed it still auto-configures
+  `pvr.iptvsimple` today, with zero manual GUI step, by writing an
+  instance-settings file directly. The JSON-RPC `Addons.*` namespace really
+  does have only four methods (`GetAddons`, `GetAddonDetails`,
+  `SetAddonEnabled`, `ExecuteAddon`, no settings/instance call), and Kodi
+  core issue `xbmc/xbmc#22779` really does confirm the Python `xbmcaddon`
+  API can't manage instance settings — but neither of those closes off
+  **direct file writes**: since Kodi 20 (Nexus), a multi-instance add-on's
+  per-instance config is just
+  `special://profile/addon_data/<addon-id>/instance-settings-<id>.xml`, in
+  Kodi core's own generic settings-serialization format
+  (`<settings version="N"><setting id="x">value</setting>...</settings>`,
+  confirmed against Kodi core's `CSettingsValueXmlSerializer` and a real
+  Kodi-migrated instance file) — a hand-written file in this format is
+  indistinguishable, to Kodi, from one its own GUI wrote, and toggling the
+  add-on off/on over `Addons.SetAddonEnabled` (the same call
+  `refresh_pvr()` already uses) makes Kodi pick it up. `generator.
+  configure_iptv_simple()` implements this (`docs/architecture.md` §7);
+  **lesson for future research**: verify claims like "X is infeasible"
+  against the actual current source of whatever's cited as precedent, not
+  a forum thread describing it — code changes, forum posts don't get
+  updated.
 
 ## Design invariants
 
@@ -455,6 +471,13 @@ see `docs/live-testing.md` for the checklist.
   (`plugin.show_setup_guide` / `plugin.show_iptv_setup_info`) are all
   unit-tested but not yet live-verified in a real Kodi — see the checklist
   in `docs/live-testing.md`.
+- **`generator.configure_iptv_simple()` (the `auto_configure_iptv` action) —
+  real IPTV Simple auto-configuration via an unofficial file-write
+  technique — is unit-tested but carries genuine risk until live-verified**,
+  since it writes into `pvr.iptvsimple`'s own profile directory, not just
+  LibTV's own. Deliberately not wired into the automatic regeneration loop
+  or the manual build action pending that verification — see
+  `docs/architecture.md` §7 and `docs/live-testing.md`.
 - XMLTV `star-rating`/`new`/`xmltv_ns` fields depend on the library actually
   reporting `rating`/`playcount` for an item — not yet spot-checked against a
   real scraper's field coverage.

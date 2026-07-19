@@ -72,6 +72,11 @@ from the same schedule, so the guide and playback always agree.
   something is playing); if a refresh is skipped because something was
   playing, it retries on its own shortly after playback stops, instead of
   waiting for the next scheduled rebuild.
+- **Auto-configure IPTV Simple Client**: instead of opening IPTV Simple's
+  settings and typing in paths, one button writes its M3U/EPG
+  configuration for you directly (an unofficial technique — Kodi has no
+  supported API for this — not yet live-verified; the manual "IPTV Simple
+  Client setup paths" dialog remains as a fallback).
 - Episode/movie durations that come back missing from your library's
   metadata (a common scraper gap) self-correct after the item is played
   once — LibTV remembers the real duration and uses it for future guide
@@ -97,16 +102,19 @@ tune/seek sequence — is documented in [`docs/architecture.md`](docs/architectu
 3. Open LibTV (add-on menu or settings) and press **Setup guide** — a
    numbered walkthrough of everything below, generated from your actual
    install so the paths in it are always correct.
-4. Install and enable **PVR IPTV Simple Client**, then point it at the two
-   files LibTV generates. LibTV's add-on menu and settings (**Guide &
-   playback** → **IPTV Simple Client setup paths**) show just these two
-   paths again any time you need them — Kodi has no API for add-ons to
-   configure each other's PVR client instances, so this step can't be
-   automated further:
-   - M3U playlist: `channels.m3u`
-   - XMLTV guide: `guide.xmltv`
-   (both live in the add-on profile directory,
-   `userdata/addon_data/plugin.video.libtv/`)
+4. Install and enable **PVR IPTV Simple Client**, then either:
+   - press **Auto-configure IPTV Simple Client** (add-on menu or settings)
+     to have LibTV write IPTV Simple's configuration for you — an
+     unofficial technique (Kodi has no supported API for one add-on to
+     configure another's PVR-client instances), not yet verified across
+     every Kodi setup; or
+   - point it at the two files LibTV generates yourself: **IPTV Simple
+     Client setup paths** (add-on menu or settings) shows the exact paths
+     to paste into IPTV Simple's own settings:
+     - M3U playlist: `channels.m3u`
+     - XMLTV guide: `guide.xmltv`
+     (both live in the add-on profile directory,
+     `userdata/addon_data/plugin.video.libtv/`)
 5. Open Kodi's **TV** section — your library channels appear with a full guide.
 
 ## Development
@@ -191,10 +199,16 @@ settings-driven write, along with whether the overlay window behaves
 correctly drawn over an actively playing PVR stream, are not yet themselves
 live-verified. As of v0.8.0, an "IPTV Simple Client setup paths" action
 (add-on menu and settings) shows the exact M3U/XMLTV paths to paste into
-IPTV Simple's own settings — full auto-configuration of IPTV Simple was
-investigated and found infeasible on Kodi 20/21 (no JSON-RPC method manages
-another add-on's settings or PVR-client instances), so this is the closest
-achievable mitigation. v0.9.0 adds a broader "Setup guide" action (first
-item in the add-on menu, first group in settings) walking the whole
-first-run flow as one numbered dialog. Neither info dialog is yet
-live-verified. See `CLAUDE.md` for development constraints and known gaps.
+IPTV Simple's own settings by hand. v0.9.0 adds a broader "Setup guide"
+action (first item in the add-on menu, first group in settings) walking
+the whole first-run flow as one numbered dialog. v0.10.0 adds real IPTV
+Simple auto-configuration ("Auto-configure IPTV Simple Client") — Kodi has
+no supported API for one add-on to configure another's PVR-client
+instances, but LibTV now writes IPTV Simple's instance-settings file
+directly (the same unofficial technique another Kodi add-on, PseudoTV
+Live, currently uses in production) and forces a reload the same way the
+existing guide-refresh already does. None of these three actions are yet
+live-verified; the auto-configuration one specifically is deliberately not
+wired into the automatic rebuild/refresh path until it is, since it writes
+into a different add-on's own directory. See `CLAUDE.md` for development
+constraints and known gaps.

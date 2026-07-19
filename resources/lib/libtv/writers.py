@@ -92,3 +92,36 @@ def render_xmltv(schedule_data):
                 ET.SubElement(star, "value").text = f"{float(prog['rating']):.1f}/10"
 
     return '<?xml version="1.0" encoding="UTF-8"?>\n' + ET.tostring(tv, encoding="unicode")
+
+
+def render_iptv_instance_settings(settings, version=2):
+    """Kodi's canonical multi-instance-addon settings file format:
+    <settings version="N"><setting id="x" default="true">value</setting>...
+    </settings> — confirmed against Kodi core's own serializer
+    (CSettingsValueXmlSerializer) and a real Kodi-migrated pvr.iptvsimple
+    instance file, and matching the format PseudoTV Live's current code
+    writes for the same purpose. Kodi's reader only looks at each
+    <setting>'s id and text, so the always-true `default` attribute (also
+    what PseudoTV writes) is harmless even when a value isn't actually the
+    schema default.
+    """
+    root = ET.Element("settings", version=str(version))
+    for setting_id, value in settings.items():
+        el = ET.SubElement(root, "setting", id=setting_id, default="true")
+        if value not in (None, ""):
+            el.text = str(value)
+    return '<?xml version="1.0" encoding="UTF-8"?>\n' + ET.tostring(root, encoding="unicode")
+
+
+def parse_iptv_instance_settings(xml_text):
+    """Inverse of render_iptv_instance_settings, for idempotency checks
+    against whatever instance file (ours from a previous run, or none) is
+    currently on disk. Missing/unparseable input returns {} rather than
+    raising — "no instance file yet" is the expected common case."""
+    if not xml_text or not xml_text.strip():
+        return {}
+    try:
+        root = ET.fromstring(xml_text)
+    except ET.ParseError:
+        return {}
+    return {el.get("id"): (el.text or "") for el in root.findall("setting")}
