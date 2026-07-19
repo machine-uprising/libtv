@@ -70,10 +70,14 @@ confirm it reads correctly before working through the steps below by hand.
      an **Auto-configure IPTV Simple Client** button that writes IPTV
      Simple's configuration for you.
    - **Manual (the proven path)**: LibTV's add-on menu and settings ("Guide
-     & playback" → **IPTV Simple Client setup paths**) show the exact
-     `channels.m3u`/`guide.xmltv` paths to paste in yourself:
-     - **General → M3U Play List** → path to `channels.m3u` (local file).
-     - **EPG Settings → XMLTV** → path to `guide.xmltv`.
+     & playback" → **IPTV Simple Client setup paths**) show `special://`
+     paths for `channels.m3u`/`guide.xmltv` to paste in yourself:
+     - **General → M3U Play List** → `special://profile/addon_data/plugin.video.libtv/channels.m3u`.
+     - **EPG Settings → XMLTV** → `special://profile/addon_data/plugin.video.libtv/guide.xmltv`.
+     (Confirmed against `pvr.iptvsimple`'s own source that it reads local
+     files through Kodi's VFS, so `special://` resolves the same as a real
+     OS path would — if that turns out wrong on your setup, the resolved
+     OS path is what step 3 above already showed as a fallback.)
 5. Open Kodi's **TV** section. The two default channels (Movies, TV Shows) —
    plus any custom channels from `channels.json` — should appear with a
    populated guide.
@@ -83,11 +87,10 @@ confirm it reads correctly before working through the steps below by hand.
 **Read this before testing.** This feature writes a file directly into
 `pvr.iptvsimple`'s own `addon_data` directory using an unofficial technique
 (no supported Kodi API covers it — see `docs/architecture.md` §7 and
-`CLAUDE.md`'s hard-constraints note). It only ever touches one
-deterministic path (`instance-settings-<crc32("LibTV")%2^31>.xml`), so it
-should never disturb any *other* PVR instance you've configured — but this
-is exactly the kind of assumption that needs a real Kodi to confirm, not
-just unit tests against faked file I/O. **If you have an existing IPTV
+`CLAUDE.md`'s hard-constraints note). It looks up an existing instance *by
+name* before deciding whether to create a new one or ask before updating
+one — this is exactly the kind of logic that needs a real Kodi to confirm,
+not just unit tests against faked file I/O. **If you have an existing IPTV
 Simple setup you care about, back up
 `userdata/addon_data/pvr.iptvsimple/` before testing this**, and prefer a
 throwaway/test Kodi profile if you have one available.
@@ -101,35 +104,67 @@ throwaway/test Kodi profile if you have one available.
    guide`, and confirm a notification reads "IPTV Simple Client configured
    — restart Kodi if the guide doesn't appear".
 4. **Confirm the file actually exists** at
-   `userdata/addon_data/pvr.iptvsimple/instance-settings-<id>.xml` and its
-   content matches `generator.m3u_path()`/`xmltv_path()` (open it — it's
-   plain XML, `<setting id="m3uPath">...</setting>` etc.).
+   `userdata/addon_data/pvr.iptvsimple/instance-settings-<id>.xml`, and
+   that `m3uPath`/`epgPath` inside it are the `special://` form
+   (`special://profile/addon_data/plugin.video.libtv/channels.m3u` /
+   `.../guide.xmltv`), **not** a resolved OS path like
+   `C:\Users\...\channels.m3u` — this is the first thing to confirm, since
+   everything downstream depends on IPTV Simple actually reading a
+   `special://` path correctly (confirmed against its source, but not
+   against a real running instance yet — see `docs/architecture.md` §7).
 5. **The critical check — does Kodi actually treat this as a real
    instance?** Open Settings → Player → my add-ons → PVR clients →
-   PVR IPTV Simple Client → **Configure**, and confirm a "LibTV" instance
-   now appears there (this is the whole premise of the technique — a
-   hand-written file being indistinguishable from one Kodi's own GUI
-   wrote; if it does *not* appear, the technique doesn't work on this Kodi
-   version/build and `docs/architecture.md` §7 needs a correction, not
-   another live round-trip guess).
+   PVR IPTV Simple Client → **Configure**, and confirm an instance named
+   "LibTV" (or whatever "Instance name" is set to) now appears there (this
+   is the whole premise of the technique — a hand-written file being
+   indistinguishable from one Kodi's own GUI wrote; if it does *not*
+   appear, the technique doesn't work on this Kodi version/build and
+   `docs/architecture.md` §7 needs a correction, not another live
+   round-trip guess).
 6. Open Kodi's **TV** section and confirm channels and guide appear —
    same end state as the manual §4 steps, but reached without typing
-   anything into IPTV Simple's own settings.
+   anything into IPTV Simple's own settings. This is also where the
+   `special://` path check from step 4 gets its real answer: if the guide
+   is empty or IPTV Simple logs a file error, the `special://` value
+   didn't resolve and the manual "IPTV Simple Client setup paths" dialog
+   is the fallback while that gets investigated.
 7. **Idempotency**: run **Auto-configure IPTV Simple Client** again with
    nothing changed. Confirm the notification reads "IPTV Simple Client is
    already configured for LibTV", no new/duplicate instance appears in
    IPTV Simple's Configure list, and `kodi.log` shows no second
    `Addons.SetAddonEnabled` toggle.
-8. **Playback guard**: start playing anything, then run the action while
-   something not-yet-configured would need a change (e.g. after manually
-   deleting the LibTV instance file first). Confirm it's skipped — log
-   line `LibTV: playback active, skipping IPTV Simple auto-configure`,
-   notification "Can't configure while something is playing" — and
-   nothing was written.
-9. **Not-installed guard**: with IPTV Simple disabled or not installed,
-   run the action and confirm the notification reads "Install and enable
-   PVR IPTV Simple Client first", with no file written.
-10. **If you have another, pre-existing PVR instance** (IPTV Simple or a
+8. **Custom instance name**: change "Instance name" (top of settings) to
+   something else (e.g. "My Channels"), run the action again, and confirm:
+   a *new* instance with that name appears in IPTV Simple's Configure list
+   (the old "LibTV"-named one is untouched, not renamed), `kodi.log`/the
+   written file both reference the new name, and the TV section still
+   works. Change it back to "LibTV" and run once more to confirm it finds
+   the *original* instance again rather than creating a third one.
+9. **Collision confirmation — the main new behavior to verify**: with
+   nothing yet configured under the current instance name, first create an
+   instance with that exact name **by hand** through Kodi's own PVR
+   settings GUI (point it anywhere, e.g. a dummy file) — this simulates a
+   user who already had their own same-named setup. Then run
+   **Auto-configure IPTV Simple Client** and confirm:
+   - A yes/no dialog appears naming the instance and asking to update it —
+     it must NOT silently overwrite.
+   - Choosing **No** leaves that instance completely unmodified (check its
+     settings in Configure, or the file's `m3uPath`, are still whatever you
+     set by hand) and the notification reads "IPTV Simple Client left
+     unchanged".
+   - Choosing **Yes** updates that *same* instance in place (still one
+     entry in Configure, not a new duplicate one) to point at LibTV's
+     files, and the notification reads the normal "configured" message.
+10. **Playback guard**: start playing anything, then run the action while
+    something not-yet-configured would need a change (e.g. after manually
+    deleting the LibTV instance file first). Confirm it's skipped — log
+    line `LibTV: playback active, skipping IPTV Simple auto-configure`,
+    notification "Can't configure while something is playing" — and
+    nothing was written.
+11. **Not-installed guard**: with IPTV Simple disabled or not installed,
+    run the action and confirm the notification reads "Install and enable
+    PVR IPTV Simple Client first", with no file written.
+12. **If you have another, pre-existing PVR instance** (IPTV Simple or a
     different PVR client) configured before testing this, confirm it is
     completely unaffected — still present, still working, in Configure
     and in the TV section — after every step above.
@@ -296,11 +331,11 @@ for wiring into the automatic regeneration loop or the manual build action
     channels are present in the guide afterward.
 - **IPTV Simple Client setup paths dialog** — from either the add-on's main
   menu or the settings button ("Guide & playback" → **IPTV Simple Client
-  setup paths**), confirm a text dialog opens showing the real, full
-  `channels.m3u` and `guide.xmltv` paths (matching what you see on disk in
-  step 4 above), and that opening it does not disturb any in-progress
-  playback or trigger a PVR refresh (no `Addons.SetAddonEnabled` /
-  `LibTV: toggled IPTV Simple...` log lines).
+  setup paths**), confirm a text dialog opens showing the `special://`
+  form of the `channels.m3u`/`guide.xmltv` paths (not a resolved OS path),
+  and that opening it does not disturb any in-progress playback or trigger
+  a PVR refresh (no `Addons.SetAddonEnabled` / `LibTV: toggled IPTV
+  Simple...` log lines).
 - **Setup guide dialog** — from either the add-on's main menu (first item)
   or settings (first group, **Setup guide**), confirm the full numbered
   walkthrough opens, is readable/scrollable in a `textviewer` dialog (long

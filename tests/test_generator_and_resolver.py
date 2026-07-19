@@ -125,10 +125,10 @@ def test_configure_iptv_simple_writes_instance_and_toggles(monkeypatch):
         "kodi_addon_instance_name": "LibTV",
         "kodi_addon_instance_enabled": "true",
         "m3uPathType": "0",
-        "m3uPath": generator.m3u_path(),
+        "m3uPath": generator.m3u_special_path(),
         "m3uCache": "false",
         "epgPathType": "0",
-        "epgPath": generator.xmltv_path(),
+        "epgPath": generator.xmltv_special_path(),
         "epgCache": "true",
     }
 
@@ -165,6 +165,71 @@ def test_configure_iptv_simple_unchanged_never_checks_playback(monkeypatch):
 
     conftest.PLAYER.update(playing=True, file="/media/a.mkv")
     assert generator.configure_iptv_simple() == "unchanged"
+
+
+def test_configure_iptv_simple_uses_custom_instance_name(monkeypatch):
+    from libtv import generator, writers
+
+    monkeypatch.setitem(conftest.SETTINGS, "instance_name", "My Channels")
+    _with_iptv_simple(monkeypatch)
+
+    assert generator.configure_iptv_simple() == "configured"
+
+    with open(generator.pvr_instance_settings_path(), encoding="utf-8") as f:
+        written = writers.parse_iptv_instance_settings(f.read())
+    assert written["kodi_addon_instance_name"] == "My Channels"
+
+
+def _write_foreign_pvr_instance(generator, writers, name, m3u_path="/somewhere/else.m3u"):
+    """Simulate an instance that already exists under `name` — e.g. one a
+    user created themselves through Kodi's own PVR settings GUI, or one
+    LibTV wrote under a since-changed name — at an id unrelated to our
+    crc32(name) scheme, to prove lookup is by content, not just path."""
+    profile = generator._pvr_client_profile_dir()
+    path = os.path.join(profile, "instance-settings-999999999.xml")
+    settings = {
+        "kodi_addon_instance_name": name,
+        "kodi_addon_instance_enabled": "true",
+        "m3uPathType": "0",
+        "m3uPath": m3u_path,
+        "m3uCache": "false",
+        "epgPathType": "0",
+        "epgPath": "/somewhere/else.xml",
+        "epgCache": "true",
+    }
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(writers.render_iptv_instance_settings(settings))
+    return path
+
+
+def test_configure_iptv_simple_detects_existing_instance_by_name_not_path(monkeypatch):
+    """A same-named instance at a non-deterministic id (e.g. GUI-created)
+    must still be found — and never silently overwritten."""
+    from libtv import generator, writers
+
+    _with_iptv_simple(monkeypatch)
+    foreign_path = _write_foreign_pvr_instance(generator, writers, "LibTV")
+
+    assert generator.configure_iptv_simple() == "exists_different"
+    assert _toggle_calls() == []
+
+    with open(foreign_path, encoding="utf-8") as f:
+        assert writers.parse_iptv_instance_settings(f.read())["m3uPath"] == "/somewhere/else.m3u"
+
+
+def test_configure_iptv_simple_force_updates_the_existing_instance_in_place(monkeypatch):
+    from libtv import generator, writers
+
+    _with_iptv_simple(monkeypatch)
+    foreign_path = _write_foreign_pvr_instance(generator, writers, "LibTV")
+
+    assert generator.configure_iptv_simple() == "exists_different"
+    assert generator.configure_iptv_simple(force=True) == "configured"
+    assert _toggle_calls() == [False, True]
+
+    with open(foreign_path, encoding="utf-8") as f:
+        written = writers.parse_iptv_instance_settings(f.read())
+    assert written["m3uPath"] == generator.m3u_special_path()
 
 
 def test_refresh_pvr_skips_when_client_missing_or_setting_off(monkeypatch):
@@ -417,8 +482,12 @@ def test_show_iptv_paths_action_displays_m3u_and_xmltv_paths(monkeypatch):
     assert len(views) == 1
     _, heading, message = views[0]
     assert heading == "LibTV - IPTV Simple Client setup"
-    assert generator.m3u_path() in message
-    assert generator.xmltv_path() in message
+    assert generator.m3u_special_path() in message
+    assert generator.xmltv_special_path() in message
+    # special:// paths, not native OS paths, since IPTV Simple reads local
+    # files through Kodi's own VFS (confirmed against its source).
+    assert generator.m3u_path() not in message
+    assert generator.xmltv_path() not in message
 
 
 def test_setup_guide_action_displays_walkthrough(monkeypatch):
@@ -432,8 +501,11 @@ def test_setup_guide_action_displays_walkthrough(monkeypatch):
     assert heading == "LibTV - Setup guide"
     assert generator.m3u_path() in message
     assert generator.xmltv_path() in message
+    assert generator.m3u_special_path() in message
+    assert generator.xmltv_special_path() in message
     assert "PVR IPTV Simple Client" in message
     assert "Manage channels" in message
+    assert generator.pvr_instance_name() in message
 
 
 def test_auto_configure_iptv_action_writes_instance_and_notifies(monkeypatch):
@@ -458,3 +530,43 @@ def test_auto_configure_iptv_action_reports_not_installed(monkeypatch):
     assert notes == [
         ("xbmcgui.notification", "LibTV", "Install and enable PVR IPTV Simple Client first")
     ]
+
+
+def test_auto_configure_iptv_action_confirms_before_overwriting_existing_instance(monkeypatch):
+    from libtv import generator, writers
+
+    _with_iptv_simple(monkeypatch)
+    foreign_path = _write_foreign_pvr_instance(generator, writers, "LibTV")
+    conftest.DIALOG_RESPONSES["yesno"].append(True)
+
+    _run_plugin(monkeypatch, "?action=auto_configure_iptv")
+
+    prompts = [c for c in conftest.CALLS if c[0] == "xbmcgui.yesno"]
+    assert len(prompts) == 1
+    assert "LibTV" in prompts[0][2]
+    assert _toggle_calls() == [False, True]
+    notes = [c for c in conftest.CALLS if c[0] == "xbmcgui.notification"]
+    assert notes == [
+        ("xbmcgui.notification", "LibTV",
+         "IPTV Simple Client configured — restart Kodi if the guide doesn't appear")
+    ]
+    with open(foreign_path, encoding="utf-8") as f:
+        written = writers.parse_iptv_instance_settings(f.read())
+    assert written["m3uPath"] == generator.m3u_special_path()
+
+
+def test_auto_configure_iptv_action_leaves_instance_alone_when_declined(monkeypatch):
+    from libtv import generator, writers
+
+    _with_iptv_simple(monkeypatch)
+    foreign_path = _write_foreign_pvr_instance(generator, writers, "LibTV")
+    conftest.DIALOG_RESPONSES["yesno"].append(False)
+
+    _run_plugin(monkeypatch, "?action=auto_configure_iptv")
+
+    assert _toggle_calls() == []
+    notes = [c for c in conftest.CALLS if c[0] == "xbmcgui.notification"]
+    assert notes == [("xbmcgui.notification", "LibTV", "IPTV Simple Client left unchanged")]
+    with open(foreign_path, encoding="utf-8") as f:
+        written = writers.parse_iptv_instance_settings(f.read())
+    assert written["m3uPath"] == "/somewhere/else.m3u"

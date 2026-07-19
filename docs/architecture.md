@@ -559,31 +559,64 @@ through any addon-facing API:
 - `generator.configure_iptv_simple()` builds this file via
   `writers.render_iptv_instance_settings()` (a pure function — construct
   `{setting_id: value}`, get back the XML string; `writers.
-  parse_iptv_instance_settings()` is the inverse, used for the idempotency
-  check below) with the fields `pvr.iptvsimple`'s own
+  parse_iptv_instance_settings()` is the inverse, used for name lookup and
+  the idempotency check below) with the fields `pvr.iptvsimple`'s own
   `resources/instance-settings.xml` schema defines for a local-path M3U/EPG
   source: `kodi_addon_instance_name`, `kodi_addon_instance_enabled`,
   `m3uPathType`/`epgPathType` (`"0"` = local path, `"1"` = remote URL — we
-  always use `"0"`, pointing straight at `generator.m3u_path()`/
-  `xmltv_path()`, since LibTV writes local files and runs no HTTP server),
-  `m3uPath`/`epgPath`, and `m3uCache`/`epgCache`.
-- The instance id is `zlib.crc32("LibTV") % 2**31` (`generator.
-  _pvr_instance_id()`) — a fixed, name-derived id (the same technique
-  PseudoTV Live uses) so the same file is always found and overwritten
-  again on the next call, rather than accumulating duplicates.
+  always use `"0"`), `m3uPath`/`epgPath`, and `m3uCache`/`epgCache`.
+- **The M3U/EPG paths written are `special://` URLs
+  (`generator.m3u_special_path()`/`xmltv_special_path()`,
+  `special://profile/addon_data/plugin.video.libtv/channels.m3u` etc.), not
+  real OS paths.** Confirmed safe by reading `pvr.iptvsimple`'s own C++
+  source (`FileUtils::GetFileContents`/`GetCachedFileContents`): it never
+  does a raw OS file open for either the "local path" or "remote URL" case
+  — both always go through `kodi::vfs::CFile`/`kodi::vfs::FileExists`/
+  `StatFile`, Kodi's VFS layer, which resolves `special://` the same as any
+  other Kodi-recognized path. This is more portable than a resolved OS path
+  (keeps working if the profile directory ever moves) and is what both
+  `configure_iptv_simple()` writes and what `show_iptv_setup_info()` shows
+  for manual entry. (`m3u_path()`/`xmltv_path()`, the *resolved* OS paths,
+  still exist and are still what `regenerate()` itself writes to — plain
+  `open()` doesn't understand `special://`, only `xbmcvfs` does; the setup
+  guide, §7 below, shows both forms since they serve different purposes —
+  "where the files are on disk" vs. "what to paste into IPTV Simple".)
+- **The instance is identified — and looked up — by name, not by a fixed
+  id.** The name comes from the `instance_name` setting (default `"LibTV"`,
+  `generator.pvr_instance_name()`) rather than a hardcoded constant, so a
+  user distinguishing multiple LibTV-like setups (or who just wants a
+  different label) can rename it. Before writing anything,
+  `_find_pvr_instance(name)` scans every `instance-settings-*.xml` in
+  `pvr.iptvsimple`'s profile dir and parses each one, looking for
+  `kodi_addon_instance_name == name` — **by content, not by path** — so it
+  also finds an instance the user created by hand through Kodi's own PVR
+  settings GUI, which would get whatever id Kodi's GUI assigned it, not our
+  `zlib.crc32(name) % 2**31` scheme. Only when *no* instance has this name
+  yet does a fresh one get created, at that crc32-derived path (the same
+  technique PseudoTV Live uses, so re-running under an unchanged name keeps
+  finding the same file rather than accumulating duplicates).
+- **A same-named instance that already exists is never silently
+  overwritten.** `configure_iptv_simple()` compares its parsed settings to
+  what we'd write; if they differ, it returns `"exists_different"` and
+  writes nothing — `plugin.auto_configure_iptv_simple()` then shows a
+  `Dialog().yesno()` confirmation naming the instance, and only calls
+  `configure_iptv_simple(force=True)` (which performs the actual write,
+  reusing the already-found path so the update lands in place rather than
+  creating a second file) if the user agrees. Declining leaves the existing
+  instance completely untouched.
 - After writing, Kodi still needs to notice the new/changed instance file —
   `configure_iptv_simple()` reuses the exact same `Addons.SetAddonEnabled`
   off/on toggle `refresh_pvr()` already uses (factored into a shared
   `_toggle_pvr_client()`), which forces the PVR manager to reload the
   add-on and, with it, discover the instance file.
-- **Idempotency comes before the playback guard, deliberately**:
-  `configure_iptv_simple()` first parses whatever's already on disk
-  (`parse_iptv_instance_settings`) and compares it to the desired settings
-  dict; a no-op call (nothing actually needs to change) returns
-  `"unchanged"` immediately without ever checking `Player().isPlaying()` —
-  only an actual write is guarded against playback (same "toggling
-  mid-playback kills the stream" invariant `refresh_pvr()` already
-  enforces). Returns one of `"not_installed"`, `"playing"`, `"unchanged"`,
+- **Idempotency comes before both the collision check and the playback
+  guard, deliberately**: a no-op call (parsed current settings already
+  equal desired) returns `"unchanged"` immediately, without ever prompting
+  about "an instance already exists" (it does, but nothing would change)
+  or checking `Player().isPlaying()` — only an actual write is guarded
+  against playback (same "toggling mid-playback kills the stream"
+  invariant `refresh_pvr()` already enforces). Returns one of
+  `"not_installed"`, `"playing"`, `"unchanged"`, `"exists_different"`, or
   `"configured"`.
 - This is **not yet live-verified** and is deliberately **not** wired into
   the automatic background regeneration loop (`daemon.run()`) or the manual
@@ -598,17 +631,18 @@ through any addon-facing API:
   several live round-trips to actually work — auto-configuration earns a
   spot in the automatic path only after it's been proven live, not before.
 - `plugin.show_iptv_setup_info()` (the `show_iptv_paths` action) remains as
-  the manual fallback — showing the two paths in a dialog to copy/paste by
-  hand — for when auto-configuration doesn't work on a given setup, or
-  before it's been live-verified at all.
+  the manual fallback — showing the two `special://` paths in a dialog to
+  copy/paste by hand — for when auto-configuration doesn't work on a given
+  setup, or before it's been live-verified at all.
 
 `plugin.show_setup_guide()` (the `setup_guide` action, reachable from both
 the main menu — first item — and a settings button that is also the first
 group in the settings screen, §8) is a broader, numbered walkthrough of the
 whole first-run flow (scan the library, optionally customize channels,
-rebuild, install/enable IPTV Simple, run auto-configure or paste in the two
-paths by hand, open the TV section, optionally bind the EPG overlay hotkey)
-— a single, prominent starting point for a brand-new install, with
+rebuild, install/enable IPTV Simple, run auto-configure — naming the
+current `instance_name` setting — or paste the `special://` paths in by
+hand, open the TV section, optionally bind the EPG overlay hotkey) — a
+single, prominent starting point for a brand-new install, with
 `show_iptv_setup_info` remaining as the narrower dialog for re-finding just
 the paths later.
 
@@ -628,8 +662,9 @@ transient.)
 
 | id | type | default | effect |
 | --- | --- | --- | --- |
+| `instance_name` | string, non-empty | `LibTV` | Both the label this LibTV setup is known by and the `pvr.iptvsimple` instance name `configure_iptv_simple()` looks for/creates (§7). |
 | `setup_guide` | action | — | `RunPlugin(…?action=setup_guide)` — first-run walkthrough dialog (§7); first group in the settings screen. |
-| `auto_configure_iptv` | action | — | `RunPlugin(…?action=auto_configure_iptv)` — writes/refreshes a dedicated "LibTV" `pvr.iptvsimple` instance via `generator.configure_iptv_simple()` (§7); an unofficial technique, not yet live-verified. |
+| `auto_configure_iptv` | action | — | `RunPlugin(…?action=auto_configure_iptv)` — writes/refreshes a `pvr.iptvsimple` instance named per `instance_name` via `generator.configure_iptv_simple()` (§7); an unofficial technique, not yet live-verified. |
 | `max_items` | integer 10–1000 | 150 | Cap on library items pulled per channel (§3/§4 `order` controls *which* items land within the cap). |
 | `shuffle` | boolean | true | Deterministic per-day reshuffle of each channel's already-selected items, on top of the per-channel `order`. |
 | `epg_hours` | integer 6–72 | 24 | Guide horizon: schedule covers `now + epg_hours`. |
@@ -640,7 +675,7 @@ transient.)
 | `autotune_channels` | action | — | `RunPlugin(…?action=autotune)` — genre-based channel autotune (§3). |
 | `autotune_studio_channels` | action | — | `RunPlugin(…?action=autotune_studio)` — studio-based channel autotune (§3). |
 | `regenerate_now` | action | — | `RunPlugin(…?action=build)`. |
-| `show_iptv_paths` | action | — | `RunPlugin(…?action=show_iptv_paths)` — shows the M3U/XMLTV paths to paste into IPTV Simple's own settings (§7); does not configure IPTV Simple itself. |
+| `show_iptv_paths` | action | — | `RunPlugin(…?action=show_iptv_paths)` — shows the `special://` M3U/XMLTV paths to paste into IPTV Simple's own settings (§7); manual fallback for `auto_configure_iptv`. |
 | `overlay_hotkey_key` | string | `g` | Kodi keymap key name for the in-playback EPG overlay (§6a); blank removes the binding. |
 | `overlay_hotkey_apply` | action | — | `RunPlugin(…?action=apply_keymap)` — `keymap.apply_from_settings()` writes/removes `special://profile/keymaps/libtv.xml` (§6a). |
 
@@ -738,15 +773,18 @@ default in `tests/conftest.py` `SETTINGS`.
   like the EPG overlay, so they carry little of that feature's risk, but
   should still get one live smoke test each (see `docs/live-testing.md`).
 - **`generator.configure_iptv_simple()` (§7) — IPTV Simple auto-configuration
-  — is unit-tested (XML round-trip, idempotency, the playback guard, the
-  installed/enabled check) but carries real, un-mitigated risk until it's
-  live-verified**: it writes into `pvr.iptvsimple`'s own profile directory
-  using an unofficial technique (no supported Kodi API covers this), so a
-  wrong assumption about the instance-settings file format or Kodi's
-  reload-on-toggle behavior could leave that add-on in a broken or
-  half-configured state, not just LibTV's own. This is exactly why it's
-  gated behind an explicit `auto_configure_iptv` action rather than wired
-  into the automatic regeneration loop or the manual build action — see
+  — is unit-tested (XML round-trip, name-based lookup against a
+  non-deterministic-id instance, the confirm-before-overwrite flow, the
+  playback guard, the installed/enabled check) but carries real,
+  un-mitigated risk until it's live-verified**: it writes into
+  `pvr.iptvsimple`'s own profile directory using an unofficial technique
+  (no supported Kodi API covers this), so a wrong assumption about the
+  instance-settings file format, the name-based lookup actually catching
+  every case Kodi's own GUI can produce, or Kodi's reload-on-toggle
+  behavior could leave that add-on in a broken or half-configured state,
+  not just LibTV's own. This is exactly why it's gated behind an explicit
+  `auto_configure_iptv` action rather than wired into the automatic
+  regeneration loop or the manual build action — see
   `docs/live-testing.md` for the checklist to clear before considering that
   promotion.
 - Possible future channel sources: per-show channels, smart-playlist-backed

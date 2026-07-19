@@ -100,3 +100,11 @@ msgstr ""
 msgctxt "#32122"
 msgid "Writes a dedicated LibTV instance directly into IPTV Simple Client's own configuration and reloads it. This is an unofficial technique (Kodi has no supported API for one add-on to configure another's PVR-client instances) - if it doesn't work, use \"IPTV Simple Client setup paths\" to configure it by hand instead."
 msgstr ""
+
+msgctxt "#32123"
+msgid "Instance name"
+msgstr ""
+
+msgctxt "#32124"
+msgid "Name used both to identify this LibTV setup and, when auto-configuring, as the PVR IPTV Simple Client instance name. If an instance with this name already exists (including one you created yourself through Kodi's own PVR settings), auto-configure will ask before changing it."
+msgstr ""

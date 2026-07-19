@@ -31,6 +31,7 @@ SETTINGS = {
     "join_in_progress": "true",
     "refresh_pvr": "true",
     "overlay_hotkey_key": "g",
+    "instance_name": "LibTV",
 }
 
 # Calls recorded by fakes, for assertions: list of (module.func, args) tuples.
@@ -126,9 +127,18 @@ def _make_xbmcvfs() -> types.ModuleType:
             return REPO_ROOT
         return path
 
+    def listdir(path: str):
+        if not os.path.exists(path):
+            return [], []
+        entries = os.listdir(path)
+        dirs = [e for e in entries if os.path.isdir(os.path.join(path, e))]
+        files = [e for e in entries if not os.path.isdir(os.path.join(path, e))]
+        return dirs, files
+
     mod.translatePath = translate_path
     mod.exists = os.path.exists
     mod.mkdirs = lambda path: os.makedirs(path, exist_ok=True) or True
+    mod.listdir = listdir
     return mod
 
 
@@ -279,13 +289,24 @@ def _reset_kodi_fakes():
         generator.schedule_path(),
         os.path.join(generator.profile_dir(), generator.M3U_NAME),
         os.path.join(generator.profile_dir(), generator.XMLTV_NAME),
-        generator.pvr_instance_settings_path(),
         keymap.path(),
     ):
         try:
             os.remove(path)
         except OSError:
             pass
+    # A test may have set a custom instance_name (reverted by monkeypatch
+    # before this teardown runs), so the file it created can't be found by
+    # recomputing pvr_instance_settings_path() here — sweep the directory
+    # for any instance-settings-*.xml instead of guessing one path.
+    pvr_dir = generator._pvr_client_profile_dir()
+    if os.path.exists(pvr_dir):
+        for fname in os.listdir(pvr_dir):
+            if fname.startswith("instance-settings-") and fname.endswith(".xml"):
+                try:
+                    os.remove(os.path.join(pvr_dir, fname))
+                except OSError:
+                    pass
     PLAYER.update(playing=False, file="", time=0.0, total=0.0)
     global _CURRENT_LISTITEM
     _CURRENT_LISTITEM = None

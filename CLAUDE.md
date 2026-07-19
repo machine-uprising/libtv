@@ -260,6 +260,32 @@ encouraged for diagnosis.
   against the actual current source of whatever's cited as precedent, not
   a forum thread describing it — code changes, forum posts don't get
   updated.
+- **The `m3uPath`/`epgPath` values written into `pvr.iptvsimple`'s config
+  can be `special://` URLs, not resolved OS paths** — confirmed by reading
+  `pvr.iptvsimple`'s own C++ source: its local-file reading
+  (`FileUtils::GetFileContents`/`GetCachedFileContents`) always goes
+  through `kodi::vfs::CFile`/`FileExists`/`StatFile` (Kodi's VFS layer),
+  never a raw OS file open, for both the local-path and remote-URL cases —
+  so `special://profile/addon_data/plugin.video.libtv/channels.m3u`
+  resolves the same as any other Kodi-recognized path would.
+  `generator.m3u_special_path()`/`xmltv_special_path()` build this from
+  `addon.getAddonInfo("profile")` directly (not `xbmcvfs.translatePath`,
+  which is for OS paths); `m3u_path()`/`xmltv_path()` (the real OS paths)
+  are unchanged and still what `regenerate()` itself writes to, since plain
+  `open()` doesn't understand `special://`.
+- **A pvr.iptvsimple instance is looked up by its `kodi_addon_instance_name`
+  setting, not by the id in its filename** — an instance a user created by
+  hand through Kodi's own PVR settings GUI gets whatever id Kodi's GUI
+  assigned, unrelated to `configure_iptv_simple()`'s own
+  `zlib.crc32(name) % 2**31` scheme for a *freshly created* instance. So
+  finding "does an instance with this name already exist" requires parsing
+  every `instance-settings-*.xml` in `pvr.iptvsimple`'s profile dir and
+  comparing each one's `kodi_addon_instance_name`
+  (`generator._find_pvr_instance`), not just checking the one deterministic
+  path. A same-named instance with different settings is never silently
+  overwritten — `configure_iptv_simple()` returns `"exists_different"` and
+  `plugin.auto_configure_iptv_simple()` confirms with the user
+  (`Dialog().yesno()`) before retrying with `force=True`.
 
 ## Design invariants
 

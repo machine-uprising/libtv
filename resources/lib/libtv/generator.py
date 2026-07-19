@@ -54,6 +54,23 @@ def xmltv_path():
     return os.path.join(profile_dir(), XMLTV_NAME)
 
 
+def _profile_special_url():
+    """The profile dir as a special:// URL rather than a real OS path — for
+    handing to another add-on's config (§ configure_iptv_simple), not for
+    our own file I/O (plain open() doesn't resolve special://; only
+    xbmcvfs does). special:// URLs always use '/', regardless of host OS."""
+    profile = xbmcaddon.Addon().getAddonInfo("profile")
+    return profile if profile.endswith("/") else profile + "/"
+
+
+def m3u_special_path():
+    return _profile_special_url() + M3U_NAME
+
+
+def xmltv_special_path():
+    return _profile_special_url() + XMLTV_NAME
+
+
 def load_channel_defs():
     """Channel definitions from channels.json (default lineup if absent)."""
     return channels.load(channels_path())
@@ -204,35 +221,75 @@ def _pvr_client_profile_dir():
     return path
 
 
-def _pvr_instance_id():
-    # IPTV Simple's instance ids are 32-bit; a name-derived crc32 gives a
-    # stable id across runs without persisting one anywhere ourselves —
-    # the same technique PseudoTV Live's current code uses.
-    return zlib.crc32(PVR_INSTANCE_NAME.encode("utf-8")) % 2147483648
+def pvr_instance_name():
+    """The name configure_iptv_simple() looks for/creates a pvr.iptvsimple
+    instance under — the "Instance name" setting, defaulting to PVR_INSTANCE_NAME
+    if left blank."""
+    return xbmcaddon.Addon().getSetting("instance_name") or PVR_INSTANCE_NAME
+
+
+def _pvr_instance_id(name):
+    # A fresh instance's id: IPTV Simple's instance ids are 32-bit, and a
+    # name-derived crc32 gives a stable id across runs without persisting
+    # one anywhere ourselves — the same technique PseudoTV Live's current
+    # code uses. Only used when no existing instance already has this name
+    # (see _find_pvr_instance) — an instance a user renamed via Kodi's own
+    # GUI keeps whatever id Kodi originally assigned it.
+    return zlib.crc32(name.encode("utf-8")) % 2147483648
+
+
+def _instance_settings_filenames():
+    profile = _pvr_client_profile_dir()
+    if not xbmcvfs.exists(profile):
+        return []
+    _dirs, files = xbmcvfs.listdir(profile)
+    return [f for f in files if f.startswith("instance-settings-") and f.endswith(".xml")]
+
+
+def _find_pvr_instance(name):
+    """Look for an existing pvr.iptvsimple instance named `name`, regardless
+    of how its id was assigned (our own crc32 scheme, or Kodi's own GUI).
+
+    Returns (path, settings): settings is {} and path is a fresh
+    crc32-derived one if no instance has this name yet; otherwise settings
+    is that instance's actual current settings and path is wherever it
+    already lives, so an update always lands on the real file rather than
+    duplicating it under a different id.
+    """
+    profile = _pvr_client_profile_dir()
+    for filename in _instance_settings_filenames():
+        path = os.path.join(profile, filename)
+        with open(path, encoding="utf-8") as f:
+            settings = writers.parse_iptv_instance_settings(f.read())
+        if settings.get("kodi_addon_instance_name") == name:
+            return path, settings
+    new_path = os.path.join(profile, f"instance-settings-{_pvr_instance_id(name)}.xml")
+    return new_path, {}
 
 
 def pvr_instance_settings_path():
-    return os.path.join(
-        _pvr_client_profile_dir(), f"instance-settings-{_pvr_instance_id()}.xml"
-    )
+    """Where configure_iptv_simple() would read/write the named instance
+    right now — an existing instance's real path if one already has this
+    name, otherwise where a new one would be created."""
+    return _find_pvr_instance(pvr_instance_name())[0]
 
 
-def _desired_pvr_instance_settings():
+def _desired_pvr_instance_settings(name):
     return {
-        "kodi_addon_instance_name": PVR_INSTANCE_NAME,
+        "kodi_addon_instance_name": name,
         "kodi_addon_instance_enabled": "true",
         "m3uPathType": "0",
-        "m3uPath": m3u_path(),
+        "m3uPath": m3u_special_path(),
         "m3uCache": "false",
         "epgPathType": "0",
-        "epgPath": xmltv_path(),
+        "epgPath": xmltv_special_path(),
         "epgCache": "true",
     }
 
 
-def configure_iptv_simple():
-    """Write/refresh a dedicated "LibTV" pvr.iptvsimple instance pointed at
-    our own M3U/XMLTV, and force Kodi to load it.
+def configure_iptv_simple(force=False):
+    """Write/refresh a pvr.iptvsimple instance (named after the "Instance
+    name" setting) pointed at our own M3U/XMLTV, and force Kodi to load it.
 
     Kodi has no supported API for one add-on to manage another's PVR-client
     instances (see docs/architecture.md §7) — this hand-writes the
@@ -241,22 +298,29 @@ def configure_iptv_simple():
     Live's current code uses, then reuses the same enable/disable JSON-RPC
     toggle `refresh_pvr()` uses to make the client pick it up.
 
-    Returns "not_installed", "playing", "unchanged", or "configured". The
-    idempotency check (parse what's already on disk and compare) runs
-    before the playback check, so a no-op call never blocks on "something
-    is playing" — only an actual write does.
+    Before writing anything, this looks for an *existing* instance with the
+    same name (`_find_pvr_instance` — by content, not just "whatever's at
+    our deterministic path", so it also catches an instance a user
+    configured by hand through Kodi's own GUI). A same-named instance with
+    different settings is never silently overwritten: this returns
+    "exists_different" and does nothing further unless called again with
+    force=True, so the caller can confirm with the user first.
+
+    Returns "not_installed", "playing", "unchanged", "exists_different", or
+    "configured". The idempotency check (parse what's already on disk and
+    compare) runs before the playback check, so a no-op call never blocks
+    on "something is playing" — only an actual write does.
     """
     if not _pvr_client_enabled():
         return "not_installed"
 
-    desired = _desired_pvr_instance_settings()
-    path = pvr_instance_settings_path()
-    current_text = ""
-    if os.path.exists(path):
-        with open(path, encoding="utf-8") as f:
-            current_text = f.read()
-    if writers.parse_iptv_instance_settings(current_text) == desired:
+    name = pvr_instance_name()
+    desired = _desired_pvr_instance_settings(name)
+    path, current = _find_pvr_instance(name)
+    if current == desired:
         return "unchanged"
+    if current and not force:
+        return "exists_different"
 
     if xbmc.Player().isPlaying():
         xbmc.log("LibTV: playback active, skipping IPTV Simple auto-configure", xbmc.LOGINFO)

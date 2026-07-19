@@ -76,7 +76,11 @@ from the same schedule, so the guide and playback always agree.
   settings and typing in paths, one button writes its M3U/EPG
   configuration for you directly (an unofficial technique — Kodi has no
   supported API for this — not yet live-verified; the manual "IPTV Simple
-  Client setup paths" dialog remains as a fallback).
+  Client setup paths" dialog remains as a fallback). It looks for an
+  existing IPTV Simple instance with the same name as LibTV's own
+  "Instance name" setting (default "LibTV") before writing anything — if
+  one already exists with different settings, it asks before changing it
+  rather than overwriting silently.
 - Episode/movie durations that come back missing from your library's
   metadata (a common scraper gap) self-correct after the item is played
   once — LibTV remembers the real duration and uses it for future guide
@@ -207,8 +211,17 @@ no supported API for one add-on to configure another's PVR-client
 instances, but LibTV now writes IPTV Simple's instance-settings file
 directly (the same unofficial technique another Kodi add-on, PseudoTV
 Live, currently uses in production) and forces a reload the same way the
-existing guide-refresh already does. None of these three actions are yet
-live-verified; the auto-configuration one specifically is deliberately not
-wired into the automatic rebuild/refresh path until it is, since it writes
-into a different add-on's own directory. See `CLAUDE.md` for development
+existing guide-refresh already does. v0.11.0 refines auto-configuration
+three ways: the M3U/XMLTV paths it writes are now `special://` URLs rather
+than resolved OS paths (confirmed against `pvr.iptvsimple`'s own source
+that it reads local files through Kodi's VFS either way); the instance
+name is now the new "Instance name" setting (default "LibTV") instead of a
+fixed string; and it now looks for an existing same-named instance by
+content before touching anything — creating a new one silently if none
+exists, but asking for confirmation before updating one that already has
+different settings, rather than ever overwriting it without asking. None
+of these actions are yet live-verified; auto-configuration specifically is
+deliberately not wired into the automatic rebuild/refresh path until it
+is, since it writes into a different add-on's own directory. See
+`CLAUDE.md` for development
 constraints and known gaps.

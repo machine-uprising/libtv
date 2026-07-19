@@ -63,11 +63,14 @@ def build(regenerate_fn=None):
 def show_setup_guide():
     """Walk a fresh install through the steps to get Live TV working.
 
-    Static prose except for the two generated paths, which are read live so
-    the guide never goes stale relative to what `show_iptv_setup_info`
-    (a more focused, dedicated dialog for just those two paths) shows.
+    Static prose except for the generated paths and instance name, which
+    are read live so the guide never goes stale relative to what
+    `show_iptv_setup_info` (a more focused, dedicated dialog for just the
+    IPTV Simple paths) shows.
     """
     m3u, xmltv = generator.m3u_path(), generator.xmltv_path()
+    m3u_special, xmltv_special = generator.m3u_special_path(), generator.xmltv_special_path()
+    name = generator.pvr_instance_name()
     message = (
         "1. Scan your videos into Kodi's library (Movies and/or TV shows) —\n"
         "   LibTV builds channels from whatever is already in your library.\n\n"
@@ -75,19 +78,22 @@ def show_setup_guide():
         "   default channels (all Movies, all TV Shows) exist out of the box.\n\n"
         "3. Press \"Rebuild channels now\" (or just wait — the background\n"
         "   service rebuilds automatically) to generate the guide and\n"
-        "   channel list:\n"
+        "   channel list on disk:\n"
         f"   {m3u}\n"
         f"   {xmltv}\n\n"
         "4. Install and enable \"PVR IPTV Simple Client\" from Kodi's\n"
         "   add-on repository (Add-ons -> Install from repository -> \n"
         "   PVR clients).\n\n"
-        "5. Press \"Auto-configure IPTV Simple Client\" to have LibTV write\n"
-        "   its own IPTV Simple instance pointed at the paths above. This\n"
+        f"5. Press \"Auto-configure IPTV Simple Client\" to have LibTV create\n"
+        f"   or update an IPTV Simple instance named \"{name}\" (change this\n"
+        "   under \"Instance name\" above) pointed at the paths below. This\n"
         "   uses an unofficial technique (Kodi has no supported API for\n"
         "   this) — if it doesn't work, use \"IPTV Simple Client setup\n"
-        "   paths\" to paste the two paths in by hand instead:\n"
-        "   General -> M3U Play List (Local Path)\n"
-        "   EPG Settings -> XMLTV URL (Local Path)\n\n"
+        "   paths\" to paste them in by hand instead:\n"
+        "   General -> M3U Play List (Local Path):\n"
+        f"   {m3u_special}\n"
+        "   EPG Settings -> XMLTV URL (Local Path):\n"
+        f"   {xmltv_special}\n\n"
         "6. Open Kodi's TV section — your channels should appear with a\n"
         "   full guide.\n\n"
         "7. (Optional) Set a hotkey under \"In-playback guide hotkey\" to\n"
@@ -98,8 +104,11 @@ def show_setup_guide():
 
 def show_iptv_setup_info():
     """Show the M3U/XMLTV paths the user must paste into IPTV Simple's own
-    settings, as a manual fallback for auto_configure_iptv_simple()."""
-    m3u, xmltv = generator.m3u_path(), generator.xmltv_path()
+    settings, as a manual fallback for auto_configure_iptv_simple(). Uses
+    special:// paths (confirmed IPTV Simple reads local files through
+    Kodi's own VFS, which resolves them) rather than a real OS path, so
+    they keep working if the profile dir ever moves."""
+    m3u, xmltv = generator.m3u_special_path(), generator.xmltv_special_path()
     message = (
         "Enter these paths into PVR IPTV Simple Client's settings:\n\n"
         f"General -> M3U Play List (Local Path):\n{m3u}\n\n"
@@ -113,14 +122,29 @@ _IPTV_CONFIGURE_MESSAGES = {
     "playing": "Can't configure while something is playing",
     "unchanged": "IPTV Simple Client is already configured for LibTV",
     "configured": "IPTV Simple Client configured — restart Kodi if the guide doesn't appear",
+    "declined": "IPTV Simple Client left unchanged",
 }
 
 
 def auto_configure_iptv_simple():
-    """Write/refresh a dedicated IPTV Simple instance for LibTV and reload
-    it — see `generator.configure_iptv_simple` for the mechanism and why
-    it's an unofficial technique rather than a supported Kodi API call."""
+    """Write/refresh a named IPTV Simple instance for LibTV and reload it —
+    see `generator.configure_iptv_simple` for the mechanism and why it's an
+    unofficial technique rather than a supported Kodi API call.
+
+    A same-named instance that already exists with *different* settings is
+    never silently overwritten: `configure_iptv_simple()` returns
+    "exists_different" for that case, and this asks the user to confirm
+    before retrying with force=True.
+    """
     outcome = generator.configure_iptv_simple()
+    if outcome == "exists_different":
+        name = generator.pvr_instance_name()
+        confirmed = xbmcgui.Dialog().yesno(
+            "LibTV",
+            f'An IPTV Simple Client instance named "{name}" already exists '
+            "with different settings. Update it to point at LibTV's guide?",
+        )
+        outcome = generator.configure_iptv_simple(force=True) if confirmed else "declined"
     icon = (
         xbmcgui.NOTIFICATION_WARNING
         if outcome in ("not_installed", "playing")
