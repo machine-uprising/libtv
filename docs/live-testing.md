@@ -98,11 +98,16 @@ throwaway/test Kodi profile if you have one available.
 1. Confirm PVR IPTV Simple Client is installed and enabled, and that
    LibTV has generated files at least once (§4 steps 1–2).
 2. From LibTV's add-on menu or settings (first group → **Auto-configure
-   IPTV Simple Client**), run the action.
+   IPTV Simple Client**), run the action, and **confirm a "Configuring IPTV
+   Simple Client…" notification appears immediately** — this is the fix
+   for a live-verified problem (see `CLAUDE.md`'s "Live-verified findings
+   (IPTV Simple auto-configuration)") where the action previously gave no
+   feedback at all until it finished, which for a disabled-IPTV-Simple run
+   meant no visible feedback whatsoever.
 3. Check `kodi.log` for `LibTV: wrote pvr.iptvsimple instance settings to
    <path>` followed by `LibTV: toggled IPTV Simple to reload channels and
-   guide`, and confirm a notification reads "IPTV Simple Client configured
-   — restart Kodi if the guide doesn't appear".
+   guide`, and confirm a second notification reads "IPTV Simple Client
+   configured — restart Kodi if the guide doesn't appear".
 4. **Confirm the file actually exists** at
    `userdata/addon_data/pvr.iptvsimple/instance-settings-<id>.xml`, and
    that `m3uPath`/`epgPath` inside it are the `special://` form
@@ -159,11 +164,18 @@ throwaway/test Kodi profile if you have one available.
     something not-yet-configured would need a change (e.g. after manually
     deleting the LibTV instance file first). Confirm it's skipped — log
     line `LibTV: playback active, skipping IPTV Simple auto-configure`,
-    notification "Can't configure while something is playing" — and
-    nothing was written.
-11. **Not-installed guard**: with IPTV Simple disabled or not installed,
-    run the action and confirm the notification reads "Install and enable
-    PVR IPTV Simple Client first", with no file written.
+    and **a blocking "OK" dialog** (not a notification toast) reading
+    "Can't configure while something is playing…" — and nothing was
+    written.
+11. **Not-installed guard — the specific case that had no feedback at all
+    before this fix**: with IPTV Simple disabled or not installed, run the
+    action and confirm: the "Configuring…" notification still appears
+    first, `kodi.log` shows a `LOGWARNING` line
+    (`LibTV: pvr.iptvsimple not installed/enabled, skipping IPTV Simple
+    auto-configure`), and — the actual fix — **a blocking "OK" dialog**
+    appears (not a toast) telling you to install/enable IPTV Simple, with
+    no file written. Confirm you can't miss it even if you've clicked
+    away from the settings screen that triggered the action.
 12. **If you have another, pre-existing PVR instance** (IPTV Simple or a
     different PVR client) configured before testing this, confirm it is
     completely unaffected — still present, still working, in Configure
@@ -469,10 +481,24 @@ already had; replaced with a `"> "` text-prefix marker instead of a color
 change. Also confirmed (and accepted as a cosmetic, Python-unfixable
 side effect): Kodi's own native channel-preview banner still fires
 alongside `ACTION_CHANNEL_UP`/`DOWN` — the actual tuned channel does not
-change from it, only an explicit selection does. **Whether the marker
-highlight now shows, and whether selecting a row tunes the channel, has
-still not been checked** (Enter/OK wasn't reachable to test last round).
-That's the next thing to verify.
+change from it, only an explicit selection does. **Confirmed live**: the
+`"> "` marker shows correctly from the moment the overlay opens. Two more
+things were wrong: (1) **the marker always started on the first channel
+in the list, not the one actually playing** — fixed by having
+`plugin.play()` also set a `"libtv_channel_id"` ListItem property (the
+same handoff mechanism as `"libtv_seek_offset"`), which
+`overlay._current_channel_id()` reads back to set the overlay's initial
+cursor. (2) **Left/Right vs Up/Down**: up/down was confirmed to actually
+change the live channel (not just show a preview banner as first
+assumed) — this can't be suppressed from Python, so navigation now uses
+Left/Right (`ACTION_MOVE_LEFT`/`ACTION_MOVE_RIGHT`) instead, per the
+user's choice among the fix tradeoffs. Left/Right are common video-seek
+keys during regular playback, so **check specifically whether Left/Right
+now has the same kind of collision Up/Down had** — don't assume it's
+clean just because it's not channel-surfing. **Not yet checked**: does
+the overlay now open on the correct channel, does Left/Right avoid a
+collision, does selecting a row tune the channel. That's the next thing
+to verify.
 
 Checklist, using whichever trigger you're testing:
 

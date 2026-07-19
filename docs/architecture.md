@@ -433,24 +433,35 @@ Two ways to trigger it, both reaching the same `context.py`/`overlay.show()`:
     its `selectedColor`) — text *content* changes are the one thing
     confirmed to reliably repaint, so the highlight piggybacks on that
     instead of depending on dynamic color updates a second time.
-  - **Navigation is hand-rolled, not native.** `_EpgOverlay.onAction` moves
-    an internal `_cursor`/`_scroll` pair — no `xbmcgui` control focus or
-    `setFocus()` is used at all, since `ControlLabel`s aren't focusable in
-    the first place and the goal was to depend on as little
-    native-rendering behavior as possible after `ControlList`'s failure.
-    **Live-verified finding**: the generic `ACTION_MOVE_UP`/
-    `ACTION_MOVE_DOWN` this overlay originally listened for did nothing —
-    a remote/keyboard during actual PVR playback generates
-    `ACTION_CHANNEL_UP`/`ACTION_CHANNEL_DOWN` instead, which also drives
-    Kodi's own native channel-preview banner *simultaneously* — `onAction`
-    now handles both action pairs, which fixed the overlay's own cursor
-    movement, but **the native channel-preview banner still fires
-    alongside it** (confirmed live) and is a cosmetic side effect this
-    add-on cannot suppress from Python — the actual tuned channel does not
-    change from it, only from an explicit selection (below).
-    `ACTION_SELECT_ITEM`/`ACTION_MOUSE_LEFT_CLICK` resolve the current
-    cursor position to a channel id and close the window;
-    `ACTION_PREVIOUS_MENU`/`ACTION_NAV_BACK` close without selecting.
+  - **Navigation is hand-rolled, not native, and uses Left/Right, not
+    Up/Down.** `_EpgOverlay.onAction` moves an internal `_cursor`/`_scroll`
+    pair — no `xbmcgui` control focus or `setFocus()` is used at all,
+    since `ControlLabel`s aren't focusable in the first place and the goal
+    was to depend on as little native-rendering behavior as possible after
+    `ControlList`'s failure. **Live-verified finding**: Up/Down
+    (`ACTION_MOVE_UP`/`DOWN`, then `ACTION_CHANNEL_UP`/`DOWN` once those
+    were also handled) *actually changed the live channel* via Kodi's
+    native channel-surf — not just a cosmetic preview — regardless of what
+    the overlay's own `onAction` did; this cannot be suppressed from a
+    Python-level `onAction`, since the physical key is evidently bound to
+    a builtin at a layer the modal window doesn't govern. **Decision**:
+    rather than keep fighting that collision, navigation moved to
+    `ACTION_MOVE_LEFT`/`ACTION_MOVE_RIGHT` (1/2), which aren't bound to
+    channel-surfing — a deliberate trade against the more conventional
+    Up/Down-for-a-vertical-list UX. Left/Right are common video-seek keys
+    during regular playback, so a similar collision there is the next
+    thing to check live. `ACTION_SELECT_ITEM`/`ACTION_MOUSE_LEFT_CLICK`
+    resolve the current cursor position to a channel id and close the
+    window; `ACTION_PREVIOUS_MENU`/`ACTION_NAV_BACK` close without
+    selecting.
+  - **The overlay opens with its cursor already on the currently-playing
+    channel**, not always the first one in the list. `plugin.play()` now
+    also sets a `"libtv_channel_id"` property on the resolved `ListItem` —
+    the exact same handoff mechanism as `"libtv_seek_offset"` (Kodi's
+    Player core retains a resolved item's own properties for as long as
+    it's playing) — and `overlay._current_channel_id()` reads it back via
+    `Player().getPlayingItem()` to compute the overlay's initial cursor/
+    scroll position.
 - **Data**: strictly **read-only** against the persisted `schedule.json` —
   `generator.load_schedule()` plus a new pure lookup,
   `schedule.find_now_and_next(data, channel_id, now_epoch)`, returning
@@ -634,6 +645,23 @@ through any addon-facing API:
   the manual fallback — showing the two `special://` paths in a dialog to
   copy/paste by hand — for when auto-configuration doesn't work on a given
   setup, or before it's been live-verified at all.
+- **Messaging**: `plugin.auto_configure_iptv_simple()` shows a "Configuring
+  IPTV Simple Client…" notification immediately, before calling
+  `generator.configure_iptv_simple()` at all — the underlying call is
+  synchronous and includes the `xbmc.sleep(500)` inside
+  `_toggle_pvr_client()`, so without this the action can visibly do nothing
+  for over half a second. The two *actionable* outcomes —
+  `"not_installed"` and `"playing"` — are shown via a blocking
+  `Dialog().ok()`, not a notification toast: a toast can go unnoticed
+  (auto-dismisses, may render behind whatever screen triggered the action,
+  e.g. the settings dialog), which is exactly the failure mode this was
+  changed in response to — a real test against a live Kodi with IPTV
+  Simple disabled produced no visible feedback of any kind. `"unchanged"`,
+  `"configured"`, and `"declined"` stay as notifications, since they're
+  non-blocking confirmations rather than problems the user needs to act
+  on. `generator.configure_iptv_simple()` also logs every outcome
+  (`not_installed` at `LOGWARNING`, others at `LOGINFO`) so `kodi.log`
+  always has a trace even if a dialog is somehow missed.
 
 `plugin.show_setup_guide()` (the `setup_guide` action, reachable from both
 the main menu — first item — and a settings button that is also the first
@@ -727,45 +755,28 @@ default in `tests/conftest.py` `SETTINGS`.
 - Genre- and studio-based channel autotune (§3, `manage.autotune_genres` /
   `manage.autotune_studios`) are implemented and unit-tested but not yet
   live-verified in a real Kodi.
-- The in-playback EPG overlay (§6a): the `kodi.context.item` trigger is
-  **confirmed not to work** live (schema-valid, but the menu entry did not
-  appear via either right-click or the `c` key on the tested setup; root
-  cause unknown). The `xbmc.python.script`/`RunScript(plugin.video.libtv)`
-  keymap trigger (with the `FullscreenLiveTV` fix) and the settings-driven
-  write of `special://profile/keymaps/libtv.xml`
-  (`keymap.apply_from_settings`) are **confirmed working** live — the
-  overlay reliably opens. Getting it to render anything cost several live
-  round-trips: a construction crash (`ControlList`'s `itemHeight` vs.
-  `_itemHeight` keyword), a completely invisible window (no background of
-  its own), then — even with a confirmed-visible background —
-  `ControlList` still produced **zero** visible output, not even its own
-  focus rectangle, across further attempts (font, colors, single vs. dual
-  label). That total silence pointed at the no-skin `ControlList`
-  rendering path itself, so rendering was rebuilt on plain
-  `ControlLabel`s with hand-rolled navigation/highlighting (§6a) — this
-  **confirmed working**: readable text now renders, and the layout is now
-  a small bottom-margin strip (fixed panel size + scrolling) instead of
-  the near-full-height panel from the first `ControlLabel` attempt.
-  Getting navigation and highlighting right cost two more rounds: (1)
-  up/down drove Kodi's own native channel-preview banner instead of the
-  overlay — traced to a remote/keyboard sending `ACTION_CHANNEL_UP`/
-  `ACTION_CHANNEL_DOWN` during PVR playback rather than the generic move
-  actions originally listened for; both are now handled, **confirmed
-  fixed for the overlay's own cursor**, but the native banner still fires
-  alongside it as an unfixable-from-Python cosmetic side effect. (2) The
-  current-row highlight, implemented as a `ControlLabel.textColor` change,
-  never visibly appeared — the same "post-initial-render `setLabel()`
-  color change doesn't repaint" problem `ControlList`'s `selectedColor`
-  had — replaced with a text-prefix marker (`"> "`) instead, since content
-  changes are the one thing confirmed to reliably repaint. **Not yet
-  live-verified**: does the marker-based highlight now show, does
-  selecting a row tune the channel, does the panel/scrolling look and
-  behave as intended. Every other PVR-specific surprise in this project —
-  `StartOffset` ignored, resolver script termination on channel change —
-  came from PVR streams differing from regular playback, so whether the
-  overlay behaves correctly over an actively playing PVR stream
-  specifically is still worth a dedicated check even once these are
-  confirmed. See `docs/live-testing.md` for the checklist.
+- The in-playback EPG overlay (§6a) has been through many live
+  round-trips (`kodi.context.item` confirmed not to work; `ControlList`
+  confirmed to render nothing at all across four attempts, replaced with
+  `ControlLabel`; Up/Down confirmed to trigger real native channel-surfing
+  and replaced with Left/Right). **Currently confirmed working live**: the
+  `RunScript` keymap trigger, readable rendered text, the bottom-margin
+  panel position/size, and the `"> "` cursor marker showing from the
+  moment the overlay opens. **Not yet live-verified**: opening with the
+  cursor already on the currently-playing channel
+  (`overlay._current_channel_id()`/`plugin.play()`'s new
+  `"libtv_channel_id"` ListItem property — same mechanism as
+  `"libtv_seek_offset"`), whether Left/Right navigation avoids the
+  channel-surf collision Up/Down had (Left/Right are common video-seek
+  keys during regular playback, so a similar collision is the next thing
+  to check), whether selecting a row tunes the channel, and whether
+  closing without selecting leaves playback alone. Every other
+  PVR-specific surprise in this project — `StartOffset` ignored, resolver
+  script termination on channel change — came from PVR streams differing
+  from regular playback, so whether the overlay behaves correctly over an
+  actively playing PVR stream specifically is still worth a dedicated
+  check even once these are confirmed. See `docs/live-testing.md` for the
+  checklist.
 - The `setup_guide` and `show_iptv_paths` info dialogs (§7,
   `plugin.show_setup_guide` / `plugin.show_iptv_setup_info`) are unit-tested
   for their dispatch and message content but not yet live-verified — both

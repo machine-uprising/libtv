@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<addon id="plugin.video.libtv" version="0.11.0" name="LibTV" provider-name="You">
+<addon id="plugin.video.libtv" version="0.11.2" name="LibTV" provider-name="You">
     <requires>
         <import addon="xbmc.python" version="3.0.1"/>
     </requires>
@@ -21,18 +21,10 @@
         <description lang="en_GB">Turn your movies and TV shows into linear channels with full TV guide support. Generates an M3U playlist and XMLTV guide for PVR IPTV Simple Client, with plugin-resolved streams so channels play whatever is currently on air.</description>
         <license>GPL-3.0-only</license>
         <platform>all</platform>
-        <news>v0.11.0: refine IPTV Simple auto-configuration - M3U/EPG paths are now written as special:// URLs instead of resolved OS paths (confirmed pvr.iptvsimple reads local files through Kodi's VFS either way), the instance is now named after a new "Instance name" setting instead of a fixed "LibTV" string, and an existing same-named instance is now looked up by its actual content (not just a fixed id) and never silently overwritten - if one already exists with different settings, LibTV asks before changing it.
+        <news>v0.11.2: fix the EPG overlay opening on the wrong channel and changing the live channel while browsing. The overlay now opens with its cursor already on the currently-playing channel (a new libtv_channel_id ListItem property, same mechanism as the join-in-progress seek offset); navigation moved from Up/Down to Left/Right since Up/Down was confirmed to actually change the live channel via Kodi's native channel-surf, not just show a preview.
 
-v0.10.0: add "Auto-configure IPTV Simple Client" (add-on menu and settings) - writes IPTV Simple's own M3U/EPG configuration directly instead of requiring you to paste in paths by hand. Uses an unofficial technique (Kodi has no supported API for one add-on to configure another's PVR-client instances); the manual "IPTV Simple Client setup paths" action remains available as a fallback.
+v0.11.1: fix IPTV Simple auto-configuration giving no visible feedback at all when IPTV Simple was disabled (found testing live). Now shows a "Configuring..." notification immediately, and uses a blocking dialog instead of a toast for the two failures that need action from you (not installed/enabled, or something playing) so they can't go unnoticed.
 
-v0.9.0: add a "Setup guide" action (first item in the add-on menu, first group in settings) that walks the whole first-run flow as a single numbered dialog, from scanning your library through pasting the generated paths into PVR IPTV Simple Client.
-
-v0.8.0: add an "IPTV Simple Client setup paths" action (add-on menu and settings) that shows the exact M3U/XMLTV paths to paste into PVR IPTV Simple Client's own settings. Kodi has no API for one add-on to configure another's settings or PVR-client instances, so this doesn't remove the manual setup step, just the need to hunt for the profile directory by hand.
-
-v0.7.11: fix the EPG overlay showing no text until the first keypress, and the highlight never appearing on any row. Labels are now always given their text as a constructor argument instead of a later setLabel() call, and the current row is marked with a "&gt; " text prefix instead of a color change (color changes after the first render weren't visibly taking effect).
-
-v0.7.10: fix EPG overlay navigation and shrink the panel — up/down previously drove Kodi's own native channel-preview banner instead of the overlay (a remote/keyboard sends ACTION_CHANNEL_UP/DOWN during PVR playback, not the generic move actions this listened for); onAction now handles both. The panel is now a small strip near the bottom margin with a handful of rows that scroll, instead of nearly the full screen height.
-
-v0.7.9: replace the EPG overlay's ControlList (which rendered nothing at all, even after four fix attempts) with plain ControlLabels and hand-rolled up/down navigation and row highlighting, since a no-skin ControlList's item-rendering path was clearly the problem, not any one parameter.</news>
+v0.11.0: refine IPTV Simple auto-configuration - M3U/EPG paths are now written as special:// URLs instead of resolved OS paths (confirmed pvr.iptvsimple reads local files through Kodi's VFS either way), the instance is now named after a new "Instance name" setting instead of a fixed "LibTV" string, and an existing same-named instance is now looked up by its actual content (not just a fixed id) and never silently overwritten - if one already exists with different settings, LibTV asks before changing it.</news>
     </extension>
 </addon>

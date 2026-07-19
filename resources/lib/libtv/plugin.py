@@ -118,12 +118,22 @@ def show_iptv_setup_info():
 
 
 _IPTV_CONFIGURE_MESSAGES = {
-    "not_installed": "Install and enable PVR IPTV Simple Client first",
-    "playing": "Can't configure while something is playing",
+    "not_installed": (
+        "PVR IPTV Simple Client isn't installed and enabled. Install/enable "
+        "it (Add-ons -> My add-ons -> PVR clients) and try again."
+    ),
+    "playing": "Can't configure while something is playing — try again once playback stops.",
     "unchanged": "IPTV Simple Client is already configured for LibTV",
     "configured": "IPTV Simple Client configured — restart Kodi if the guide doesn't appear",
     "declined": "IPTV Simple Client left unchanged",
 }
+
+# Outcomes the user must actually act on — shown as a blocking dialog they
+# have to dismiss, not a notification toast that can go unnoticed (e.g. if
+# they've already navigated away from the settings screen that triggered
+# it). "unchanged"/"configured"/"declined" are just confirmations and stay
+# as toasts.
+_IPTV_CONFIGURE_BLOCKING_OUTCOMES = ("not_installed", "playing")
 
 
 def auto_configure_iptv_simple():
@@ -136,21 +146,25 @@ def auto_configure_iptv_simple():
     "exists_different" for that case, and this asks the user to confirm
     before retrying with force=True.
     """
+    dialog = xbmcgui.Dialog()
+    dialog.notification("LibTV", "Configuring IPTV Simple Client…", xbmcgui.NOTIFICATION_INFO, 3000)
+    xbmc.log("LibTV: auto-configure IPTV Simple Client requested", xbmc.LOGINFO)
+
     outcome = generator.configure_iptv_simple()
     if outcome == "exists_different":
         name = generator.pvr_instance_name()
-        confirmed = xbmcgui.Dialog().yesno(
+        confirmed = dialog.yesno(
             "LibTV",
             f'An IPTV Simple Client instance named "{name}" already exists '
             "with different settings. Update it to point at LibTV's guide?",
         )
         outcome = generator.configure_iptv_simple(force=True) if confirmed else "declined"
-    icon = (
-        xbmcgui.NOTIFICATION_WARNING
-        if outcome in ("not_installed", "playing")
-        else xbmcgui.NOTIFICATION_INFO
-    )
-    xbmcgui.Dialog().notification("LibTV", _IPTV_CONFIGURE_MESSAGES[outcome], icon, 5000)
+
+    message = _IPTV_CONFIGURE_MESSAGES[outcome]
+    if outcome in _IPTV_CONFIGURE_BLOCKING_OUTCOMES:
+        dialog.ok("LibTV", message)
+    else:
+        dialog.notification("LibTV", message, xbmcgui.NOTIFICATION_INFO, 5000)
 
 
 def play(handle, channel_id):
@@ -182,6 +196,12 @@ def play(handle, channel_id):
 
     prog, offset = found
     li = xbmcgui.ListItem(path=prog["file"])
+    # Lets overlay.show() find which channel is currently playing (so the
+    # EPG overlay can open with its cursor already on it) via the same
+    # Player().getPlayingItem() property mechanism as libtv_seek_offset —
+    # Kodi's Player core retains the resolved ListItem's own properties for
+    # as long as it's playing, independent of this script having exited.
+    li.setProperty("libtv_channel_id", channel_id)
     # The join-in-progress seek is performed by the service (daemon.py) from
     # Player.onAVStarted — this resolver script is not reliable for it (Kodi
     # terminates it during channel changes, and ignores StartOffset on

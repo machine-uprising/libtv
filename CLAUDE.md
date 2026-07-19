@@ -476,13 +476,56 @@ see `docs/live-testing.md` for the checklist.
   with a text prefix (`"> "` on the current row, `"  "` on others) — text
   *content* changes are the one thing confirmed twice now to reliably
   repaint; don't reach for dynamic control colors in this add-on's
-  code-only windows again without expecting this. Also confirmed
-  (unfixable from Python): **Kodi's native channel-preview banner fires
-  alongside the overlay's own cursor movement** on every
-  `ACTION_CHANNEL_UP`/`DOWN` — cosmetic only, the actual tuned channel
-  doesn't change from it. **Not yet live-verified**: does the marker
-  highlight actually show, does selecting a row tune the channel. See
+  code-only windows again without expecting this.
+- **Eighth live pass: the marker showed correctly, but two things were
+  reported wrong.** (1) **The overlay always opened with its cursor on
+  the first channel in the list, not the one actually playing.** **Fix**:
+  `plugin.play()` now also sets a `"libtv_channel_id"` property on the
+  resolved `ListItem` — the identical handoff mechanism as
+  `"libtv_seek_offset"` (Kodi's Player core retains a resolved item's own
+  properties for as long as it's playing) — and
+  `overlay._current_channel_id()` reads it back to compute the overlay's
+  initial cursor/scroll position. (2) **Up/Down genuinely changed the
+  live channel being watched, not just a cosmetic preview banner as
+  first assumed** — confirmed by the user's own wording ("channel shift
+  on the actual player"). This is *not* fixable from a Python-level
+  `onAction`: the physical key is evidently bound to Kodi's native
+  channel-surf at a layer the modal overlay window doesn't govern,
+  regardless of whether `onAction` also receives and handles the same
+  action id. **Decision (user's choice, given the fix options and their
+  tradeoffs)**: rather than attempt a riskier, unverified window-scoped
+  keymap override, navigation was moved to `ACTION_MOVE_LEFT`/
+  `ACTION_MOVE_RIGHT` (1/2) instead of Up/Down — a deliberate UX
+  trade-off, since Left/Right is less conventional for browsing a
+  vertical list, but isn't natively bound to channel-surfing. **Caveat
+  flagged, not yet checked**: Left/Right are commonly bound to seek
+  back/forward during regular video playback — if that collides the same
+  way, it'll need a different key pair again. **Not yet live-verified**:
+  does the cursor now open on the correct channel, does Left/Right avoid
+  the collision, does selecting a row tune the channel. See
   `docs/live-testing.md` §5a.
+
+**Live-verified findings (IPTV Simple auto-configuration):**
+
+- **First live pass against a Kodi instance with IPTV Simple disabled
+  produced no visible error or warning of any kind** — the underlying
+  `_pvr_client_enabled()` check itself worked correctly (it returns
+  `"not_installed"`, confirmed by unit test and by the JSON-RPC error
+  handling already in `library.json_rpc`), but the *only* feedback was a
+  single `xbmcgui.Dialog().notification()` toast: easy to miss entirely if
+  the user had already navigated away from the screen that triggered the
+  action, and there was no earlier "this is running" feedback either,
+  since the whole call is synchronous and includes the 500ms
+  `xbmc.sleep()` inside the reload toggle. **Fix**:
+  `plugin.auto_configure_iptv_simple()` now shows an immediate "Configuring
+  IPTV Simple Client…" notification before doing any work, and the two
+  actionable failure outcomes (`"not_installed"`, `"playing"`) now use a
+  blocking `Dialog().ok()` instead of a notification, so they can't be
+  missed the same way. `generator.configure_iptv_simple()` also gained a
+  `LOGWARNING` log line for the not-installed case (previously logged
+  nothing at all for that branch). **Not yet re-verified** that the fix
+  actually resolves the visibility problem live — see
+  `docs/live-testing.md` §4a.
 
 ## Known gaps (as of 2026-07)
 
@@ -513,17 +556,19 @@ see `docs/live-testing.md` for the checklist.
   validation/XML-rendering/write-remove logic — the `WindowDialog`/
   `ControlLabel` rendering cannot be faked meaningfully. The
   `kodi.context.item` trigger is **confirmed not to work** (see "Live-
-  verified findings" above); the `RunScript(plugin.video.libtv)`/keymap
-  trigger (with the `FullscreenLiveTV` fix) is **confirmed to fire** and
-  reliably opens the window, the `ControlLabel`-based rendering (which
-  replaced an `xbmcgui.ControlList` that rendered nothing at all across
-  four fix attempts) is **confirmed to display readable rows**, and the
-  bottom-margin scrolling panel is **confirmed correctly positioned**.
-  Kodi's native channel-preview banner firing alongside
-  `ACTION_CHANNEL_UP`/`DOWN` is a **confirmed, accepted cosmetic quirk**
-  (the actual tuned channel doesn't change from it). Still open,
-  addressed but not yet re-verified: does the marker-based (`"> "`)
-  highlight now actually show (the previous `textColor`-based one never
-  did, on any row); does selecting a row tune the channel; does closing
-  without selecting leave playback alone — drawn over an actively playing
-  **PVR** stream specifically. See `docs/live-testing.md` §5a.
+  verified findings" above). **Confirmed working live**: the
+  `RunScript(plugin.video.libtv)`/keymap trigger, the `ControlLabel`-based
+  rendering (which replaced an `xbmcgui.ControlList` that rendered nothing
+  at all across four fix attempts), readable text and the `"> "` cursor
+  marker, and the bottom-margin scrolling panel's position. **Confirmed
+  needing a real fix, not cosmetic**: Up/Down genuinely changed the live
+  channel via Kodi's native channel-surf, not just a preview — navigation
+  moved to Left/Right instead (user's choice among the fix options; see
+  "Live-verified findings" for the tradeoffs). **Not yet re-verified**:
+  does the overlay now open with its cursor already on the
+  currently-playing channel (`"libtv_channel_id"` property, new this
+  round); does Left/Right avoid the same collision Up/Down had (Left/
+  Right are common video-seek keys, so this needs checking, not assuming);
+  does selecting a row tune the channel; does closing without selecting
+  leave playback alone — drawn over an actively playing **PVR** stream
+  specifically. See `docs/live-testing.md` §5a.

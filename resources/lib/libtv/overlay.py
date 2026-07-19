@@ -59,20 +59,40 @@ _VISIBLE_ROWS = 4  # fits _PANEL_H with margin; more rows scroll into view
 # Confirmed against the real xbmcgui module (Kodistubs 21/Omega).
 # tests.conftest's fake xbmcgui doesn't define the named constants, so use
 # the numeric values directly rather than depending on the fake growing them.
-_ACTION_MOVE_UP = 3
-_ACTION_MOVE_DOWN = 4
 _ACTION_SELECT_ITEM = 7
 _ACTION_PREVIOUS_MENU = 10
 _ACTION_MOUSE_LEFT_CLICK = 100
 _ACTION_NAV_BACK = 92
-# Live testing found up/down instead drove Kodi's own channel-preview
-# banner (channel info changed, but nothing tuned, and our highlight never
-# moved) — the generic ACTION_MOVE_UP/DOWN this overlay listened for
-# apparently isn't what a remote/keyboard sends during PVR playback;
-# ACTION_CHANNEL_UP/DOWN is. Handling both is harmless if only one ever
-# fires on a given setup.
-_ACTION_CHANNEL_UP = 184
-_ACTION_CHANNEL_DOWN = 185
+# Live testing found ACTION_MOVE_UP/DOWN (3/4) did nothing to the overlay —
+# a remote/keyboard during actual PVR playback instead generates
+# ACTION_CHANNEL_UP/DOWN (184/185), which *also* drives Kodi's own native
+# channel-surf simultaneously (confirmed: the live channel changed, not
+# just a preview). That collision can't be suppressed from a Python-level
+# onAction, so navigation uses Left/Right instead — not bound to
+# channel-surfing — even though Up/Down would read more conventionally for
+# a vertical list. Left/Right are common video-seek keys during regular
+# playback, so if this collides too, that's the next thing to check.
+_ACTION_MOVE_LEFT = 1
+_ACTION_MOVE_RIGHT = 2
+
+
+def _current_channel_id():
+    """The LibTV channel id actually playing right now, or None.
+
+    Mirrors the already-live-verified libtv_seek_offset handoff
+    (plugin.play sets a ListItem property; Kodi's Player core retains it
+    for as long as that item is playing, independent of the resolver
+    script having already exited) so the overlay can open with its cursor
+    already on the right row instead of always defaulting to the first
+    channel in the list.
+    """
+    player = xbmc.Player()
+    if not player.isPlaying():
+        return None
+    try:
+        return player.getPlayingItem().getProperty("libtv_channel_id") or None
+    except RuntimeError:
+        return None
 
 
 def _row_label(name, current, upcoming):
@@ -104,14 +124,16 @@ class _EpgOverlay(xbmcgui.WindowDialog):
     so the panel stays a fixed, small strip regardless of channel count.
     """
 
-    def __init__(self, rows):
+    def __init__(self, rows, initial_index=0):
         super().__init__()
         # rows: [(channel_id, name, current_prog_or_None, next_prog_or_None), ...]
         self._rows = rows
         self._channel_ids = [row[0] for row in rows]
         self.selected_channel = None
-        self._cursor = 0
-        self._scroll = 0
+        self._cursor = initial_index
+        # Keep the initial cursor in view rather than always scrolled to
+        # the top — matters once there are more channels than visible rows.
+        self._scroll = max(0, min(initial_index, len(rows) - _VISIBLE_ROWS))
 
         # Background first so labels draw on top of it, not behind.
         self._background = xbmcgui.ControlImage(_PANEL_X, _PANEL_Y, _PANEL_W, _PANEL_H, _BG_IMAGE)
@@ -157,9 +179,9 @@ class _EpgOverlay(xbmcgui.WindowDialog):
         action_id = action.getId()
         if action_id in (_ACTION_PREVIOUS_MENU, _ACTION_NAV_BACK):
             self.close()
-        elif action_id in (_ACTION_MOVE_UP, _ACTION_CHANNEL_UP):
+        elif action_id == _ACTION_MOVE_LEFT:
             self._move(-1)
-        elif action_id in (_ACTION_MOVE_DOWN, _ACTION_CHANNEL_DOWN):
+        elif action_id == _ACTION_MOVE_RIGHT:
             self._move(1)
         elif action_id in (_ACTION_SELECT_ITEM, _ACTION_MOUSE_LEFT_CLICK):
             if 0 <= self._cursor < len(self._channel_ids):
@@ -192,8 +214,11 @@ def show():
         current, upcoming = schedule.find_now_and_next(data, ch["id"], now)
         rows.append((ch["id"], ch["name"], current, upcoming))
 
+    current_id = _current_channel_id()
+    initial_index = next((i for i, r in enumerate(rows) if r[0] == current_id), 0)
+
     xbmc.log(f"LibTV: overlay showing {len(rows)} channel row(s)", xbmc.LOGINFO)
-    overlay = _EpgOverlay(rows)
+    overlay = _EpgOverlay(rows, initial_index)
     overlay.doModal()
     xbmc.log("LibTV: overlay closed", xbmc.LOGINFO)
     selected = overlay.selected_channel

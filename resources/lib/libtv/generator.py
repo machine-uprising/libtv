@@ -312,14 +312,24 @@ def configure_iptv_simple(force=False):
     on "something is playing" — only an actual write does.
     """
     if not _pvr_client_enabled():
+        xbmc.log(
+            f"LibTV: {PVR_CLIENT} not installed/enabled, skipping IPTV Simple auto-configure",
+            xbmc.LOGWARNING,
+        )
         return "not_installed"
 
     name = pvr_instance_name()
     desired = _desired_pvr_instance_settings(name)
     path, current = _find_pvr_instance(name)
     if current == desired:
+        xbmc.log(f"LibTV: {PVR_CLIENT} instance {name!r} already configured", xbmc.LOGINFO)
         return "unchanged"
     if current and not force:
+        xbmc.log(
+            f"LibTV: {PVR_CLIENT} instance {name!r} exists with different settings, "
+            "awaiting confirmation before updating",
+            xbmc.LOGINFO,
+        )
         return "exists_different"
 
     if xbmc.Player().isPlaying():

@@ -80,7 +80,10 @@ from the same schedule, so the guide and playback always agree.
   existing IPTV Simple instance with the same name as LibTV's own
   "Instance name" setting (default "LibTV") before writing anything — if
   one already exists with different settings, it asks before changing it
-  rather than overwriting silently.
+  rather than overwriting silently. Shows a "Configuring…" notification as
+  soon as you press the button, and a blocking dialog (not just a toast)
+  if IPTV Simple isn't installed/enabled or something is playing, so a
+  failure can't go unnoticed.
 - Episode/movie durations that come back missing from your library's
   metadata (a common scraper gap) self-correct after the item is played
   once — LibTV remembers the real duration and uses it for future guide
@@ -219,9 +222,15 @@ name is now the new "Instance name" setting (default "LibTV") instead of a
 fixed string; and it now looks for an existing same-named instance by
 content before touching anything — creating a new one silently if none
 exists, but asking for confirmation before updating one that already has
-different settings, rather than ever overwriting it without asking. None
-of these actions are yet live-verified; auto-configuration specifically is
-deliberately not wired into the automatic rebuild/refresh path until it
-is, since it writes into a different add-on's own directory. See
-`CLAUDE.md` for development
+different settings, rather than ever overwriting it without asking.
+v0.11.1 fixes a real gap found testing v0.10.0 live: with IPTV Simple
+disabled, auto-configure produced no visible error or warning at all. It
+now shows a "Configuring…" notification immediately (the underlying call
+is synchronous and can take over half a second), and the two failure cases
+that need the user to actually do something — not installed/enabled, or
+something is playing — now use a blocking dialog instead of a toast that
+could go unnoticed. None of these actions are yet live-verified;
+auto-configuration specifically is deliberately not wired into the
+automatic rebuild/refresh path until it is, since it writes into a
+different add-on's own directory. See `CLAUDE.md` for development
 constraints and known gaps.

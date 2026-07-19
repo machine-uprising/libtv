@@ -508,6 +508,9 @@ def test_setup_guide_action_displays_walkthrough(monkeypatch):
     assert generator.pvr_instance_name() in message
 
 
+_CONFIGURING_NOTE = ("xbmcgui.notification", "LibTV", "Configuring IPTV Simple Client…")
+
+
 def test_auto_configure_iptv_action_writes_instance_and_notifies(monkeypatch):
     _with_iptv_simple(monkeypatch)
 
@@ -516,20 +519,25 @@ def test_auto_configure_iptv_action_writes_instance_and_notifies(monkeypatch):
     assert _toggle_calls() == [False, True]
     notes = [c for c in conftest.CALLS if c[0] == "xbmcgui.notification"]
     assert notes == [
+        _CONFIGURING_NOTE,
         ("xbmcgui.notification", "LibTV",
-         "IPTV Simple Client configured — restart Kodi if the guide doesn't appear")
+         "IPTV Simple Client configured — restart Kodi if the guide doesn't appear"),
     ]
 
 
 def test_auto_configure_iptv_action_reports_not_installed(monkeypatch):
+    """A user-actionable failure must be impossible to miss — a blocking
+    dialog, not just a toast that could go unnoticed."""
     _with_iptv_simple(monkeypatch, enabled=False)
 
     _run_plugin(monkeypatch, "?action=auto_configure_iptv")
 
     notes = [c for c in conftest.CALLS if c[0] == "xbmcgui.notification"]
-    assert notes == [
-        ("xbmcgui.notification", "LibTV", "Install and enable PVR IPTV Simple Client first")
-    ]
+    assert notes == [_CONFIGURING_NOTE]
+    oks = [c for c in conftest.CALLS if c[0] == "xbmcgui.ok"]
+    assert len(oks) == 1
+    assert oks[0][1] == "LibTV"
+    assert "PVR IPTV Simple Client isn't installed and enabled" in oks[0][2]
 
 
 def test_auto_configure_iptv_action_confirms_before_overwriting_existing_instance(monkeypatch):
@@ -547,8 +555,9 @@ def test_auto_configure_iptv_action_confirms_before_overwriting_existing_instanc
     assert _toggle_calls() == [False, True]
     notes = [c for c in conftest.CALLS if c[0] == "xbmcgui.notification"]
     assert notes == [
+        _CONFIGURING_NOTE,
         ("xbmcgui.notification", "LibTV",
-         "IPTV Simple Client configured — restart Kodi if the guide doesn't appear")
+         "IPTV Simple Client configured — restart Kodi if the guide doesn't appear"),
     ]
     with open(foreign_path, encoding="utf-8") as f:
         written = writers.parse_iptv_instance_settings(f.read())
@@ -566,7 +575,25 @@ def test_auto_configure_iptv_action_leaves_instance_alone_when_declined(monkeypa
 
     assert _toggle_calls() == []
     notes = [c for c in conftest.CALLS if c[0] == "xbmcgui.notification"]
-    assert notes == [("xbmcgui.notification", "LibTV", "IPTV Simple Client left unchanged")]
+    assert notes == [
+        _CONFIGURING_NOTE,
+        ("xbmcgui.notification", "LibTV", "IPTV Simple Client left unchanged"),
+    ]
     with open(foreign_path, encoding="utf-8") as f:
         written = writers.parse_iptv_instance_settings(f.read())
     assert written["m3uPath"] == "/somewhere/else.m3u"
+
+
+def test_auto_configure_iptv_action_blocks_dialog_while_playing(monkeypatch):
+    """The other actionable failure — mid-playback, on a fresh instance
+    that needs no confirmation — also gets a blocking dialog, not just a
+    toast."""
+    _with_iptv_simple(monkeypatch)
+    conftest.PLAYER.update(playing=True, file="/media/a.mkv")
+
+    _run_plugin(monkeypatch, "?action=auto_configure_iptv")
+
+    oks = [c for c in conftest.CALLS if c[0] == "xbmcgui.ok"]
+    assert len(oks) == 1
+    assert "playing" in oks[0][2]
+    assert _toggle_calls() == []

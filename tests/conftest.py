@@ -38,8 +38,10 @@ SETTINGS = {
 CALLS: list[tuple] = []
 
 # Queued dialog answers, popped FIFO per method; empty queue = cancel-ish
-# defaults (select -1, multiselect None, input "", yesno False).
-DIALOG_RESPONSES: dict[str, list] = {"select": [], "multiselect": [], "input": [], "yesno": []}
+# defaults (select -1, multiselect None, input "", yesno False, ok True).
+DIALOG_RESPONSES: dict[str, list] = {
+    "select": [], "multiselect": [], "input": [], "yesno": [], "ok": [],
+}
 
 
 def _execute_jsonrpc(request: str) -> str:
@@ -197,6 +199,10 @@ class _Dialog:
     def yesno(self, heading, message, nolabel="", yeslabel="", autoclose=0) -> bool:
         CALLS.append(("xbmcgui.yesno", heading, message))
         return _dialog_answer("yesno", False)
+
+    def ok(self, heading, message) -> bool:
+        CALLS.append(("xbmcgui.ok", heading, message))
+        return _dialog_answer("ok", True)
 
     def textviewer(self, heading, text, usemono=False) -> None:
         CALLS.append(("xbmcgui.textviewer", heading, text))
