@@ -22,37 +22,6 @@
                     <control type="button" format="action"/>
                 </setting>
             </group>
-            <group id="1" label="32101">
-                <setting id="max_items" type="integer" label="32102" help="">
-                    <level>0</level>
-                    <default>150</default>
-                    <constraints>
-                        <minimum>10</minimum>
-                        <maximum>1000</maximum>
-                    </constraints>
-                    <control type="slider" format="integer"/>
-                </setting>
-                <setting id="shuffle" type="boolean" label="32103" help="">
-                    <level>0</level>
-                    <default>true</default>
-                    <control type="toggle"/>
-                </setting>
-                <setting id="manage_channels" type="action" label="32110" help="">
-                    <level>0</level>
-                    <data>ActivateWindow(Videos,plugin://plugin.video.libtv/?action=channels,return)</data>
-                    <control type="button" format="action"/>
-                </setting>
-                <setting id="autotune_channels" type="action" label="32111" help="">
-                    <level>0</level>
-                    <data>RunPlugin(plugin://plugin.video.libtv/?action=autotune)</data>
-                    <control type="button" format="action"/>
-                </setting>
-                <setting id="autotune_studio_channels" type="action" label="32112" help="">
-                    <level>0</level>
-                    <data>RunPlugin(plugin://plugin.video.libtv/?action=autotune_studio)</data>
-                    <control type="button" format="action"/>
-                </setting>
-            </group>
             <group id="2" label="32104">
                 <setting id="epg_hours" type="integer" label="32105" help="">
                     <level>0</level>
@@ -103,6 +72,41 @@
                     <level>0</level>
                     <data>RunPlugin(plugin://plugin.video.libtv/?action=apply_keymap)</data>
                     <control type="button" format="action"/>
+                </setting>
+            </group>
+        </category>
+        <category id="channels" label="32101" help="">
+            <group id="0" label="32125">
+                <setting id="manage_channels" type="action" label="32110" help="">
+                    <level>0</level>
+                    <data>RunPlugin(plugin://plugin.video.libtv/?action=open_channels)</data>
+                    <control type="button" format="action"/>
+                </setting>
+                <setting id="autotune_channels" type="action" label="32111" help="">
+                    <level>0</level>
+                    <data>RunPlugin(plugin://plugin.video.libtv/?action=autotune)</data>
+                    <control type="button" format="action"/>
+                </setting>
+                <setting id="autotune_studio_channels" type="action" label="32112" help="">
+                    <level>0</level>
+                    <data>RunPlugin(plugin://plugin.video.libtv/?action=autotune_studio)</data>
+                    <control type="button" format="action"/>
+                </setting>
+            </group>
+            <group id="1" label="32126">
+                <setting id="max_items" type="integer" label="32102" help="">
+                    <level>0</level>
+                    <default>150</default>
+                    <constraints>
+                        <minimum>10</minimum>
+                        <maximum>1000</maximum>
+                    </constraints>
+                    <control type="slider" format="integer"/>
+                </setting>
+                <setting id="shuffle" type="boolean" label="32103" help="">
+                    <level>0</level>
+                    <default>true</default>
+                    <control type="toggle"/>
                 </setting>
             </group>
         </category>

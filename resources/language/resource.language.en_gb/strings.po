@@ -108,3 +108,11 @@ msgstr ""
 msgctxt "#32124"
 msgid "Name used both to identify this LibTV setup and, when auto-configuring, as the PVR IPTV Simple Client instance name. If an instance with this name already exists (including one you created yourself through Kodi's own PVR settings), auto-configure will ask before changing it."
 msgstr ""
+
+msgctxt "#32125"
+msgid "Lineup"
+msgstr ""
+
+msgctxt "#32126"
+msgid "Content selection"
+msgstr ""

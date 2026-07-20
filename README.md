@@ -232,5 +232,15 @@ something is playing — now use a blocking dialog instead of a toast that
 could go unnoticed. None of these actions are yet live-verified;
 auto-configuration specifically is deliberately not wired into the
 automatic rebuild/refresh path until it is, since it writes into a
-different add-on's own directory. See `CLAUDE.md` for development
-constraints and known gaps.
+different add-on's own directory. v0.11.3 fixes a real bug found live: the
+settings screen's "Manage channels" button did nothing when clicked,
+because its `ActivateWindow` binding couldn't reliably fire from within the
+modal Add-on Settings dialog — it now runs a small script action that
+closes the dialog first, then opens the channel list. Channel-management
+settings (Manage channels, auto-generate by genre/studio, max items,
+shuffle) also moved to their own "Channels" settings tab so lineup
+management isn't buried under "General", and "Regenerate channels now"
+(plus any channel edit that triggers a full rebuild) now shows a
+"Rebuilding…" notification immediately instead of appearing to do nothing
+until the rebuild finishes. None of this is yet live-verified. See
+`CLAUDE.md` for development constraints and known gaps.

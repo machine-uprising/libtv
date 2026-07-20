@@ -42,6 +42,24 @@ def main_menu(base_url, handle):
     xbmcplugin.endOfDirectory(handle)
 
 
+def open_channel_manager():
+    """Open the channel-management directory from the settings dialog.
+
+    The settings button can't just be `ActivateWindow(Videos,…)` directly in
+    its `<data>`: the Add-on Settings dialog is itself a modal dialog, and
+    Kodi does not reliably swap the active window out from under an open
+    dialog — the settings button used to bind straight to that ActivateWindow
+    call and silently did nothing when clicked. Routing it through a
+    RunPlugin action instead means real Python code runs synchronously, so
+    the dialog can be explicitly closed and *then* the Videos window
+    activated, sequenced rather than left to chance.
+    """
+    xbmc.executebuiltin("Dialog.Close(all,true)")
+    xbmc.executebuiltin(
+        "ActivateWindow(Videos,plugin://plugin.video.libtv/?action=channels,return)"
+    )
+
+
 def build(regenerate_fn=None):
     """Rebuild everything and refresh the PVR client.
 
@@ -49,7 +67,15 @@ def build(regenerate_fn=None):
     `generator.regenerate()` (e.g. `manage.py`'s diff-driven
     `generator.relabel_schedule` for edits that don't change what any
     channel fetches) while still sharing the refresh/notification logic.
+
+    A rebuild can take a few seconds (a JSON-RPC round trip per channel),
+    so an upfront notification is shown before doing any work — the same
+    "don't leave the button looking dead while something synchronous runs"
+    fix already applied to auto_configure_iptv_simple().
     """
+    xbmcgui.Dialog().notification(
+        "LibTV", "Rebuilding channels & guide…", xbmcgui.NOTIFICATION_INFO, 4000
+    )
     (regenerate_fn or generator.regenerate)()
     refreshed = generator.refresh_pvr()
     message = (
@@ -236,6 +262,8 @@ def run(argv):
         show_setup_guide()
     elif action == "auto_configure_iptv":
         auto_configure_iptv_simple()
+    elif action == "open_channels":
+        open_channel_manager()
     elif action in ("channels", "channel_add", "channel_options", "autotune", "autotune_studio"):
         # Imported lazily: manage imports plugin (for build), so a top-level
         # import here would be circular.

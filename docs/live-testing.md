@@ -281,10 +281,35 @@ for wiring into the automatic regeneration loop or the manual build action
   updates to the new add-on version and the cache doesn't carry forward stale
   entries from a different version (delete the file and let it regrow if you
   need a clean before/after comparison).
+- **Settings-screen "Manage channels" button (needs real-Kodi confirmation,
+  not yet live-verified)** — the button previously bound directly to
+  `ActivateWindow(Videos,…?action=channels,return)` in `<data>` and, per a
+  user report against the live instance, did nothing when clicked (the Add-on
+  Settings dialog is itself modal — see `docs/architecture.md` §3 for why
+  this can silently swallow a direct `ActivateWindow`). It now routes through
+  `RunPlugin(…?action=open_channels)` → `plugin.open_channel_manager()`,
+  which explicitly closes the settings dialog first
+  (`Dialog.Close(all,true)`) and only then activates the Videos window.
+  Confirm: opening Settings -> the new **Channels** tab -> **Manage
+  channels** now closes the settings dialog and opens the channel list (not
+  just that it does nothing); confirm the same for the add-on menu's own
+  "Manage channels" folder item, which is unaffected by this change (plain
+  container navigation, not launched from a modal dialog) and should still
+  work as before.
+- **`regenerate_now` / channel-management rebuild status messaging** —
+  press **Regenerate channels now** and confirm a "Rebuilding channels &
+  guide…" notification appears immediately (not just the final "Channels &
+  guide updated" toast once the rebuild finishes) — this was a user-reported
+  gap: a full rebuild is a synchronous JSON-RPC round trip per channel, so
+  without the upfront toast the button looked unresponsive for however long
+  that took. Confirm the same upfront toast appears for management-UI
+  mutations that trigger a full rebuild (e.g. **Add channel**, **Edit
+  filters & order**), since they share `plugin.build()`.
 - **Channel management UI** — open **Manage channels** (add-on menu or the
-  settings button). Verify each command item actually runs its dialog flow
-  when clicked (the items are non-folder command items that end with
-  `Container.Refresh` — a pattern that needs real-Kodi confirmation):
+  settings screen's **Channels** tab). Verify each command item actually
+  runs its dialog flow when clicked (the items are non-folder command items
+  that end with `Container.Refresh` — a pattern that needs real-Kodi
+  confirmation):
   - **Add** a channel (e.g. Movies, one genre, a year range) → it appears in
     the list, in `channels.json`, and — after the automatic rebuild+refresh —
     in the TV guide with only matching items scheduled.
@@ -325,8 +350,9 @@ for wiring into the automatic regeneration loop or the manual build action
     combination you know matches nothing (e.g. a genre with no year overlap)
     and confirm it reports 0 rather than erroring or silently saving.
   - **Auto-generate channels by genre** (add-on menu's "+ Auto-generate
-    channels by genre" item, or the settings button) → pick a content type,
-    multiselect several genres, confirm → each selected genre gets its own
+    channels by genre" item, or the settings screen's **Channels** tab) →
+    pick a content type, multiselect several genres, confirm → each
+    selected genre gets its own
     channel (named e.g. "Action Movies") with programmes matching that
     genre. Reopen the same flow: the previously selected genres should show
     pre-checked. Uncheck one and confirm → its channel disappears from the
@@ -334,8 +360,9 @@ for wiring into the automatic regeneration loop or the manual build action
     Run it again for a *different* content type (e.g. TV shows after
     Movies) and confirm the first type's autotune channels survive.
   - **Auto-generate channels by studio** (add-on menu's "+ Auto-generate
-    channels by studio" item, or the settings button) → same flow as genre
-    autotune but from the library's studio field; confirm it behaves
+    channels by studio" item, or the settings screen's **Channels** tab) →
+    same flow as genre autotune but from the library's studio field;
+    confirm it behaves
     identically (create/rerun-idempotent/deselect-removes) and that genre-
     and studio-autotune channels for the same content type coexist without
     either rebuild deleting the other's channels — e.g. run genre autotune

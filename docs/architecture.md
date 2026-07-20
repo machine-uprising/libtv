@@ -102,11 +102,12 @@ deleted every channel.
   `max_items`, and their base sequence — see §4 for how each is implemented.
   Missing/invalid `order` values (older `channels.json` files predate this
   field) normalize to `random`.
-- The management UI (`manage.py`, reachable from the add-on menu and a
-  settings button) edits the file via dialogs; every mutation saves and
-  refreshes the PVR client immediately, but only rebuilds what actually
-  needs it (**diff-driven invalidation**, below). Genre and studio pickers
-  are populated from the library (`library.fetch_genres`,
+- The management UI (`manage.py`, reachable from the add-on menu's folder
+  item and the settings screen's own **Channels** tab, §8) edits the file
+  via dialogs; every mutation saves and refreshes the PVR client
+  immediately, but only rebuilds what actually needs it (**diff-driven
+  invalidation**, below). Genre and studio pickers are populated from the
+  library (`library.fetch_genres`,
   `library.fetch_studios` — JSON-RPC has no `GetStudios`, so studios are
   aggregated from movie/show items); for a `mixed` channel these union the
   movie and tvshow results.
@@ -142,6 +143,20 @@ deleted every channel.
   window, reading Kodi's own `limits.total` rather than fetching items).
   Catches an over-narrow (or accidentally unfiltered) channel before it's
   committed, without the cost of a full `fetch_channels`-style dry run.
+- **Opening the management UI from settings**: the settings screen's
+  "Manage channels" button cannot bind directly to
+  `ActivateWindow(Videos,…?action=channels,return)` in its `<data>` — the
+  Add-on Settings dialog is itself a modal dialog, and Kodi does not
+  reliably swap the active window out from under an open dialog, so a
+  direct `ActivateWindow` binding silently does nothing when clicked. The
+  button instead binds to `RunPlugin(…?action=open_channels)`, which runs
+  `plugin.open_channel_manager()` — real Python that explicitly closes the
+  settings dialog (`Dialog.Close(all,true)`) and only then activates the
+  Videos window on the channel list, so the two steps are sequenced rather
+  than left to the builtin parser to race. The add-on menu's own "Manage
+  channels" folder item is unaffected — that's normal container navigation,
+  not launched from within a modal dialog, so it still binds straight to
+  the `channels` action.
 - **Autotune** — two independent facets, same shape, reachable from "Manage
   channels" and their own settings buttons:
   - **Genre** (`manage.autotune_genres`) auto-generates one channel per
@@ -688,24 +703,36 @@ transient.)
 
 ## 8. Settings
 
+The settings screen has two categories (tabs): **General** and **Channels**
+— the latter exists specifically so channel-lineup management has its own
+page rather than being buried in general options, per the settings screen
+UX below.
+
+### General
+
 | id | type | default | effect |
 | --- | --- | --- | --- |
 | `instance_name` | string, non-empty | `LibTV` | Both the label this LibTV setup is known by and the `pvr.iptvsimple` instance name `configure_iptv_simple()` looks for/creates (§7). |
 | `setup_guide` | action | — | `RunPlugin(…?action=setup_guide)` — first-run walkthrough dialog (§7); first group in the settings screen. |
 | `auto_configure_iptv` | action | — | `RunPlugin(…?action=auto_configure_iptv)` — writes/refreshes a `pvr.iptvsimple` instance named per `instance_name` via `generator.configure_iptv_simple()` (§7); an unofficial technique, not yet live-verified. |
-| `max_items` | integer 10–1000 | 150 | Cap on library items pulled per channel (§3/§4 `order` controls *which* items land within the cap). |
-| `shuffle` | boolean | true | Deterministic per-day reshuffle of each channel's already-selected items, on top of the per-channel `order`. |
 | `epg_hours` | integer 6–72 | 24 | Guide horizon: schedule covers `now + epg_hours`. |
 | `regen_interval_hours` | integer 1–24 | 6 | Service regeneration period. |
 | `join_in_progress` | boolean | true | Seek into the current programme on tune (§6). |
 | `refresh_pvr` | boolean | true | Toggle IPTV Simple after rebuilds so the guide reloads (§7). |
-| `manage_channels` | action | — | `ActivateWindow(Videos,…?action=channels,return)` — opens the management UI (§3). |
-| `autotune_channels` | action | — | `RunPlugin(…?action=autotune)` — genre-based channel autotune (§3). |
-| `autotune_studio_channels` | action | — | `RunPlugin(…?action=autotune_studio)` — studio-based channel autotune (§3). |
-| `regenerate_now` | action | — | `RunPlugin(…?action=build)`. |
+| `regenerate_now` | action | — | `RunPlugin(…?action=build)` — `plugin.build()` shows a "Rebuilding channels & guide…" notification immediately (a full rebuild is a synchronous JSON-RPC round trip per channel, so without this the button looks dead until it finishes), then the existing "Channels & guide updated"/"…guide refresh skipped" notification. |
 | `show_iptv_paths` | action | — | `RunPlugin(…?action=show_iptv_paths)` — shows the `special://` M3U/XMLTV paths to paste into IPTV Simple's own settings (§7); manual fallback for `auto_configure_iptv`. |
 | `overlay_hotkey_key` | string | `g` | Kodi keymap key name for the in-playback EPG overlay (§6a); blank removes the binding. |
 | `overlay_hotkey_apply` | action | — | `RunPlugin(…?action=apply_keymap)` — `keymap.apply_from_settings()` writes/removes `special://profile/keymaps/libtv.xml` (§6a). |
+
+### Channels
+
+| id | type | default | effect |
+| --- | --- | --- | --- |
+| `manage_channels` | action | — | `RunPlugin(…?action=open_channels)` — `plugin.open_channel_manager()` closes the settings dialog (`Dialog.Close(all,true)`) then `ActivateWindow(Videos,…?action=channels,return)`s into the management UI (§3); a direct `ActivateWindow` in `<data>` doesn't work from within the modal settings dialog, see §3. |
+| `autotune_channels` | action | — | `RunPlugin(…?action=autotune)` — genre-based channel autotune (§3). |
+| `autotune_studio_channels` | action | — | `RunPlugin(…?action=autotune_studio)` — studio-based channel autotune (§3). |
+| `max_items` | integer 10–1000 | 150 | Cap on library items pulled per channel (§3/§4 `order` controls *which* items land within the cap). |
+| `shuffle` | boolean | true | Deterministic per-day reshuffle of each channel's already-selected items, on top of the per-channel `order`. |
 
 Adding a setting requires: `resources/settings.xml` entry (new format:
 `<level>`, `<default>`, `<control>`), a msgid in `strings.po`, and a mirrored

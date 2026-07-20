@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<addon id="plugin.video.libtv" version="0.11.2" name="LibTV" provider-name="You">
+<addon id="plugin.video.libtv" version="0.11.3" name="LibTV" provider-name="You">
     <requires>
         <import addon="xbmc.python" version="3.0.1"/>
     </requires>
@@ -21,7 +21,9 @@
         <description lang="en_GB">Turn your movies and TV shows into linear channels with full TV guide support. Generates an M3U playlist and XMLTV guide for PVR IPTV Simple Client, with plugin-resolved streams so channels play whatever is currently on air.</description>
         <license>GPL-3.0-only</license>
         <platform>all</platform>
-        <news>v0.11.2: fix the EPG overlay opening on the wrong channel and changing the live channel while browsing. The overlay now opens with its cursor already on the currently-playing channel (a new libtv_channel_id ListItem property, same mechanism as the join-in-progress seek offset); navigation moved from Up/Down to Left/Right since Up/Down was confirmed to actually change the live channel via Kodi's native channel-surf, not just show a preview.
+        <news>v0.11.3: fix the settings screen's "Manage channels" button doing nothing when clicked (reported live) - it bound directly to ActivateWindow from within the modal Add-on Settings dialog, which Kodi doesn't reliably honor; it now closes the settings dialog first, then opens the channel list. Channel management settings (Manage channels, auto-generate by genre/studio, max items, shuffle) now live on their own "Channels" tab instead of being buried under "General". "Regenerate channels now" (and any channel edit that triggers a full rebuild) now shows a "Rebuilding..." notification immediately instead of leaving the button looking unresponsive until the rebuild finishes.
+
+v0.11.2: fix the EPG overlay opening on the wrong channel and changing the live channel while browsing. The overlay now opens with its cursor already on the currently-playing channel (a new libtv_channel_id ListItem property, same mechanism as the join-in-progress seek offset); navigation moved from Up/Down to Left/Right since Up/Down was confirmed to actually change the live channel via Kodi's native channel-surf, not just show a preview.
 
 v0.11.1: fix IPTV Simple auto-configuration giving no visible feedback at all when IPTV Simple was disabled (found testing live). Now shows a "Configuring..." notification immediately, and uses a blocking dialog instead of a toast for the two failures that need action from you (not installed/enabled, or something playing) so they can't go unnoticed.
 

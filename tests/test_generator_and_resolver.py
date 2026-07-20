@@ -434,7 +434,10 @@ def test_build_action_regenerates_and_refreshes_pvr(monkeypatch):
     assert generator.load_schedule() is not None
     assert _toggle_calls() == [False, True]
     notes = [c for c in conftest.CALLS if c[0] == "xbmcgui.notification"]
-    assert notes == [("xbmcgui.notification", "LibTV", "Channels & guide updated")]
+    assert notes == [
+        ("xbmcgui.notification", "LibTV", "Rebuilding channels & guide…"),
+        ("xbmcgui.notification", "LibTV", "Channels & guide updated"),
+    ]
 
 
 def test_build_action_reports_skipped_refresh(monkeypatch):
@@ -447,7 +450,24 @@ def test_build_action_reports_skipped_refresh(monkeypatch):
     assert _toggle_calls() == []
     notes = [c for c in conftest.CALLS if c[0] == "xbmcgui.notification"]
     assert notes == [
-        ("xbmcgui.notification", "LibTV", "Channels rebuilt — guide refresh skipped")
+        ("xbmcgui.notification", "LibTV", "Rebuilding channels & guide…"),
+        ("xbmcgui.notification", "LibTV", "Channels rebuilt — guide refresh skipped"),
+    ]
+
+
+def test_open_channels_action_closes_dialog_then_activates_window(monkeypatch):
+    """The settings button can't bind straight to ActivateWindow (the Add-on
+    Settings dialog is itself modal and swallows it) — it routes through
+    this RunPlugin action instead so the dialog is closed first."""
+    _run_plugin(monkeypatch, "?action=open_channels")
+
+    builtins = [c for c in conftest.CALLS if c[0] == "xbmc.executebuiltin"]
+    assert builtins == [
+        ("xbmc.executebuiltin", "Dialog.Close(all,true)"),
+        (
+            "xbmc.executebuiltin",
+            "ActivateWindow(Videos,plugin://plugin.video.libtv/?action=channels,return)",
+        ),
     ]
 
 

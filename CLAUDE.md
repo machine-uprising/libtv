@@ -63,7 +63,11 @@ work through its checklist — it maps which document owns what.
     first-run `setup_guide` walkthrough, `auto_configure_iptv_simple` (real
     auto-configuration of IPTV Simple, via `generator.configure_iptv_simple`),
     and `show_iptv_setup_info` (the manual fallback — just the M3U/XMLTV
-    paths to paste into IPTV Simple's settings by hand)
+    paths to paste into IPTV Simple's settings by hand); `open_channel_manager`
+    closes the modal settings dialog before `ActivateWindow`-ing into the
+    channel list, since the settings screen's "Manage channels" button can't
+    bind straight to `ActivateWindow` from within that dialog (see "Known
+    gaps" below)
   - `manage.py` — dialog-driven channel management UI (with a match-count
     preview before saving a channel's filters) + genre- and studio-based
     autotune
@@ -540,6 +544,35 @@ see `docs/live-testing.md` for the checklist.
   (`plugin.show_setup_guide` / `plugin.show_iptv_setup_info`) are all
   unit-tested but not yet live-verified in a real Kodi — see the checklist
   in `docs/live-testing.md`.
+- **User-reported: the settings screen's "Manage channels" button did
+  nothing when clicked.** Root cause (not yet live-confirmed, but consistent
+  with known Kodi behavior): the button's `<data>` bound directly to
+  `ActivateWindow(Videos,…?action=channels,return)`, and the Add-on Settings
+  dialog is itself a modal dialog — Kodi does not reliably swap the active
+  window out from under an open dialog, so the `ActivateWindow` call could
+  silently no-op. **Fix**: the button now binds to
+  `RunPlugin(…?action=open_channels)` → `plugin.open_channel_manager()`,
+  which runs real Python that explicitly does `Dialog.Close(all,true)` before
+  `ActivateWindow`, sequencing the two rather than leaving it to the builtin
+  parser. Also split the settings screen into two categories/tabs —
+  **General** and **Channels** (the latter holding `manage_channels`,
+  `autotune_channels`, `autotune_studio_channels`, `max_items`, `shuffle`) —
+  so channel-lineup management is a page of its own rather than a group
+  inside "General", per user feedback that channel management felt buried.
+  **Not yet live-verified**: does the settings button now actually open the
+  channel list; does the add-on menu's own "Manage channels" folder item
+  (unaffected by this change — plain container navigation, not launched
+  from a modal dialog) still work as before. See `docs/live-testing.md`.
+- **User-reported: "Regenerate channels now" gave no feedback while
+  running** — the button only showed a notification once the rebuild
+  finished, and a full rebuild is a synchronous JSON-RPC round trip per
+  channel, so it could look unresponsive for however long that took. **Fix**:
+  `plugin.build()` now shows a "Rebuilding channels & guide…" notification
+  immediately, before doing any work — the same pattern already used by
+  `auto_configure_iptv_simple()`. Since `manage._apply()` also calls
+  `plugin.build()` for every full-rebuild channel-management mutation (add,
+  edit filters/order, autotune), those flows get the same upfront toast for
+  free. **Not yet live-verified**.
 - **`generator.configure_iptv_simple()` (the `auto_configure_iptv` action) —
   real IPTV Simple auto-configuration via an unofficial file-write
   technique — is unit-tested but carries genuine risk until live-verified**,
