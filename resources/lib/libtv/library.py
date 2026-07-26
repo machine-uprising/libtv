@@ -2,8 +2,11 @@
 from __future__ import annotations
 
 import json
+import os
+import xml.etree.ElementTree as ET
 
 import xbmc
+import xbmcvfs
 
 from libtv import channels, schedule
 
@@ -20,6 +23,16 @@ EPISODE_PROPS = [
     "title", "file", "runtime", "plot", "showtitle", "season", "episode", "genre",
     "firstaired", "director", "cast", "thumbnail", "streamdetails", "rating", "playcount",
 ]
+
+# Files.GetDirectory (used to evaluate a smart playlist, see fetch_playlist_items)
+# returns whichever fields actually apply to each returned item's own type, so
+# requesting the union of both property lists is harmless.
+PLAYLIST_PROPS = list(dict.fromkeys(MOVIE_PROPS + EPISODE_PROPS))
+
+# Where Kodi stores saved video smart playlists. Movies/TV-episode playlists
+# may be saved either directly here or one level into movies/ or tvshows/
+# subfolders — both layouts are listed.
+_PLAYLISTS_ROOT = "special://profile/playlists/video/"
 
 # media kind -> (method, result key, properties)
 _QUERIES = {
@@ -65,40 +78,61 @@ def _resolve_runtime(item, runtime_cache=None):
     return item
 
 
+def _select(defn, items, sort, max_items, anchor_epoch):
+    """Apply a channel's `order` to a fetched item pool and cap at max_items.
+
+    "az"/"newest" were already sorted+limited server-side, so this just
+    re-applies the cap (belt-and-braces for the mixed-type case, where each
+    media kind was capped individually before combining). "random" (no
+    server-side sort) picks a day-stable random sample via
+    `schedule.shuffled`, seeded on `anchor_epoch` — a plain server-side
+    random sort would re-randomize on every regeneration and violate the
+    "schedule is stable within a day" invariant. Shared by both the
+    filter-query and smart-playlist fetch paths in fetch_channels.
+    """
+    if sort:
+        return items[:max_items]
+    return schedule.shuffled(defn["id"], items, anchor_epoch)[:max_items]
+
+
+def _fetch_filter_items(defn, max_items, runtime_cache, sort):
+    filt = channels.build_filter(defn)
+    items = []
+    for kind in _MEDIA[defn["type"]]:
+        method, key, props = _QUERIES[kind]
+        params = {"properties": props}
+        if filt:
+            params["filter"] = filt
+        if sort:
+            params["sort"] = sort
+            params["limits"] = {"start": 0, "end": max_items}
+        fetched = json_rpc(method, params).get(key, [])
+        items.extend(_resolve_runtime(item, runtime_cache) for item in fetched)
+    return items
+
+
 def fetch_channels(definitions, max_items, anchor_epoch, runtime_cache=None):
-    """Query the library per channel definition and return raw channel
-    definitions (unscheduled). Filters run server-side in Kodi's database.
+    """Query each channel definition's source and return raw channel
+    definitions (unscheduled).
 
-    Mixed channels query both movies and episodes and combine the results;
-    `max_items` caps the combined per-channel total, not each query.
-
-    Selection depends on the channel's `order` (channels.build_sort):
-    "az"/"newest" ask Kodi to sort and limit server-side, so the cap always
-    lands on the same alphabetically/recency-first slice. "random" (the
-    default) instead pulls the whole filtered set and picks a day-stable
-    random sample via `schedule.shuffled`, seeded on `anchor_epoch` — a plain
-    server-side random sort would re-randomize on every regeneration and
-    violate the "schedule is stable within a day" invariant.
+    Two sources (channels.SOURCES): "filter" queries VideoLibrary.GetMovies/
+    GetEpisodes server-side per genres/studios/year_from/year_to (mixed
+    channels query both kinds and combine the results; `max_items` caps the
+    combined per-channel total, not each query). "smartplaylist" instead
+    evaluates an existing Kodi Smart Playlist via fetch_playlist_items.
+    Either way, `_select` applies the channel's `order` and the max_items cap
+    the same way.
     """
     out = []
     for defn in definitions:
-        filt = channels.build_filter(defn)
         sort = channels.build_sort(defn)
-        items = []
-        for kind in _MEDIA[defn["type"]]:
-            method, key, props = _QUERIES[kind]
-            params = {"properties": props}
-            if filt:
-                params["filter"] = filt
-            if sort:
-                params["sort"] = sort
-                params["limits"] = {"start": 0, "end": max_items}
-            fetched = json_rpc(method, params).get(key, [])
-            items.extend(_resolve_runtime(item, runtime_cache) for item in fetched)
-        if sort:
-            items = items[:max_items]
+        if defn.get("source") == "smartplaylist":
+            limits = {"start": 0, "end": max_items} if sort else None
+            fetched = fetch_playlist_items(defn["playlist_path"], sort, limits)
+            items = [_resolve_runtime(item, runtime_cache) for item in fetched]
         else:
-            items = schedule.shuffled(defn["id"], items, anchor_epoch)[:max_items]
+            items = _fetch_filter_items(defn, max_items, runtime_cache, sort)
+        items = _select(defn, items, sort, max_items, anchor_epoch)
         out.append({
             "id": defn["id"],
             "name": defn["name"],
@@ -113,12 +147,19 @@ def count_matches(defn):
     """Total items this (possibly not-yet-saved) channel definition would
     currently pull, without fetching the items themselves.
 
-    A cheap preview for the management UI — confirms a filter combination
+    A cheap preview for the management UI — confirms a filter/playlist
     actually matches something in the library before the user commits to
-    saving the channel, at the cost of one extra JSON-RPC round trip per
-    media kind (properties=[] and a zero-width limits window keep the
-    response small; Kodi still reports the true match count in `limits.total`).
+    saving the channel, at the cost of one extra JSON-RPC round trip
+    (properties=[] and a zero-width limits window keep the response small;
+    Kodi still reports the true match count in `limits.total`).
     """
+    if defn.get("source") == "smartplaylist":
+        params = {
+            "directory": defn["playlist_path"], "media": "video",
+            "properties": [], "limits": {"start": 0, "end": 0},
+        }
+        result = json_rpc("Files.GetDirectory", params)
+        return result.get("limits", {}).get("total", len(result.get("files", [])))
     filt = channels.build_filter(defn)
     total = 0
     for kind in _MEDIA[defn["type"]]:
@@ -129,6 +170,75 @@ def count_matches(defn):
         result = json_rpc(method, params)
         total += result.get("limits", {}).get("total", len(result.get(key, [])))
     return total
+
+
+def _playlists_root_os():
+    return xbmcvfs.translatePath(_PLAYLISTS_ROOT)
+
+
+def _xsp_filenames(os_dir):
+    if not xbmcvfs.exists(os_dir):
+        return []
+    _dirs, files = xbmcvfs.listdir(os_dir)
+    return [f for f in files if f.lower().endswith(".xsp")]
+
+
+def _parse_xsp(os_path):
+    """(kodi_type, name) parsed from a smart playlist file, or (None, None)
+    if it can't be read/parsed."""
+    try:
+        with open(os_path, encoding="utf-8") as f:
+            root = ET.parse(f).getroot()
+    except (OSError, ET.ParseError):
+        return None, None
+    return root.get("type"), (root.findtext("name") or "").strip()
+
+
+def fetch_playlists():
+    """Available Movies/TV-episode smart playlists, for the channel-source
+    picker (manage._pick_playlist).
+
+    Only .xsp files whose declared root type is "movies" or "episodes" are
+    returned — these map directly onto LibTV's own channel `type`s and query
+    shape. Show-level ("tvshows") and non-video playlist types are skipped
+    (see docs/architecture.md's roadmap gap).
+    """
+    root_os = _playlists_root_os()
+    subdirs = [("", root_os)]
+    if xbmcvfs.exists(root_os):
+        dirs, _files = xbmcvfs.listdir(root_os)
+        subdirs += [(d + "/", os.path.join(root_os, d)) for d in dirs]
+
+    out = []
+    for prefix, os_dir in subdirs:
+        for filename in _xsp_filenames(os_dir):
+            kodi_type, name = _parse_xsp(os.path.join(os_dir, filename))
+            if kodi_type not in ("movies", "episodes"):
+                continue
+            out.append({
+                "path": _PLAYLISTS_ROOT + prefix + filename,
+                "name": name or filename[:-len(".xsp")],
+                "type": kodi_type,
+            })
+    return out
+
+
+def fetch_playlist_items(path, sort=None, limits=None):
+    """Items a smart playlist currently evaluates to.
+
+    Delegates evaluation to Kodi itself via Files.GetDirectory on the
+    playlist's own special:// path, rather than reimplementing Kodi's smart-
+    playlist rule engine (field/operator/group vocabulary) in Python — this
+    automatically supports every rule Kodi's own Smart Playlist editor
+    offers. This JSON-RPC technique is new to this codebase and not yet
+    live-verified — see docs/live-testing.md.
+    """
+    params = {"directory": path, "media": "video", "properties": PLAYLIST_PROPS}
+    if sort:
+        params["sort"] = sort
+    if limits:
+        params["limits"] = limits
+    return json_rpc("Files.GetDirectory", params).get("files", [])
 
 
 _KODI_LIBRARY_TYPES = {"movies": ("movie",), "episodes": ("tvshow",), "mixed": ("movie", "tvshow")}

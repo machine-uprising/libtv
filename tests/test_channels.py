@@ -8,7 +8,7 @@ from libtv import channels
 def _custom(**overrides):
     defn = {"id": "libtv.custom.1", "name": "80s Action", "type": "movies",
             "genres": [], "studios": [], "year_from": None, "year_to": None,
-            "order": "random"}
+            "order": "random", "source": "filter", "playlist_path": "", "playlist_name": ""}
     defn.update(overrides)
     return defn
 
@@ -200,3 +200,50 @@ def test_build_sort_az_and_newest():
     assert channels.build_sort(_custom(order="newest")) == {
         "method": "dateadded", "order": "descending"
     }
+
+
+def test_load_defaults_missing_source_to_filter_for_backward_compatibility(tmp_path):
+    path = tmp_path / "channels.json"
+    path.write_text(json.dumps({"version": 1, "channels": [
+        {"id": "libtv.custom.1", "name": "Old channel", "type": "movies"},
+    ]}), encoding="utf-8")
+    defn = channels.load(str(path))[0]
+    assert defn["source"] == "filter"
+    assert defn["playlist_path"] == ""
+    assert defn["playlist_name"] == ""
+
+
+def test_load_drops_invalid_source(tmp_path):
+    path = tmp_path / "channels.json"
+    path.write_text(json.dumps({"version": 1, "channels": [
+        {"id": "libtv.custom.1", "name": "X", "type": "movies", "source": "nonsense"},
+    ]}), encoding="utf-8")
+    assert channels.load(str(path))[0]["source"] == "filter"
+
+
+def test_smartplaylist_source_round_trips(tmp_path):
+    path = str(tmp_path / "channels.json")
+    defs = [_custom(
+        source="smartplaylist",
+        playlist_path="special://profile/playlists/video/80s.xsp",
+        playlist_name="80s Action",
+    )]
+    channels.save(path, defs)
+    assert channels.load(path) == defs
+
+
+def test_describe_smartplaylist_shows_playlist_name_not_filters():
+    text = channels.describe(_custom(
+        source="smartplaylist", playlist_name="80s Action",
+        genres=["Comedy"], year_from=1980,
+    ))
+    assert text.startswith("Smart playlist: 80s Action")
+    assert "Comedy" not in text
+    assert "1980" not in text
+
+
+def test_describe_smartplaylist_still_shows_order():
+    text = channels.describe(_custom(
+        source="smartplaylist", playlist_name="80s Action", order="az",
+    ))
+    assert "A–Z" in text

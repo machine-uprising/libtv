@@ -34,14 +34,18 @@ from the same schedule, so the guide and playback always agree.
 
 - **Custom channels**: out of the box you get two channels (all Movies, all
   TV Shows), and **Manage channels** (in the add-on menu and settings) lets
-  you build your own — movie, TV-show, or mixed (movies and TV shows
-  together) channels filtered by genre, studio, and production years, with
-  full control over channel names and lineup order. Editing a channel's
-  filters shows a "N items match this channel" preview before you save, so
-  an over-narrow (or accidentally empty) filter is obvious immediately.
-  Renaming, reordering, or deleting a channel updates the guide instantly
-  without re-scanning your whole library — only adding a channel or
-  changing its filters does a full rescan.
+  you build your own two ways: movie, TV-show, or mixed (movies and TV
+  shows together) channels filtered by genre, studio, and production years,
+  with full control over channel names and lineup order — or, if you'd
+  rather reuse criteria you've already built in Kodi's own **Smart
+  Playlist** editor, point a channel straight at an existing Movies or TV
+  Episodes smart playlist instead (not yet live-verified — see
+  `docs/live-testing.md`). Editing a channel's filters or playlist shows a
+  "N items match this channel" preview before you save, so an over-narrow
+  (or accidentally empty) match is obvious immediately. Renaming,
+  reordering, or deleting a channel updates the guide instantly without
+  re-scanning your whole library — only adding a channel or changing its
+  filters/playlist does a full rescan.
 - **Auto-generate channels by genre or studio**: instead of adding channels
   one at a time, pick a content type and multiselect genres (or studios)
   from your library — LibTV creates one channel per selection. Re-run either
@@ -242,5 +246,11 @@ shuffle) also moved to their own "Channels" settings tab so lineup
 management isn't buried under "General", and "Regenerate channels now"
 (plus any channel edit that triggers a full rebuild) now shows a
 "Rebuilding…" notification immediately instead of appearing to do nothing
-until the rebuild finishes. None of this is yet live-verified. See
-`CLAUDE.md` for development constraints and known gaps.
+until the rebuild finishes. v0.12.0 adds Kodi Smart Playlists as a second
+channel source: a channel can now be pointed at an existing Movies or TV
+Episodes smart playlist instead of LibTV's own genre/studio/year filters,
+evaluated by delegating to Kodi itself over JSON-RPC (`Files.GetDirectory`
+on the playlist's own path) rather than reimplementing Kodi's
+smart-playlist rule engine — a technique new to this codebase and, like the
+rest of this list, not yet live-verified. See `CLAUDE.md` for development
+constraints and known gaps.

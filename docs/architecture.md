@@ -77,6 +77,41 @@ deleted every channel.
 - `type` is `movies`, `episodes`, or `mixed` (movies and episodes combined in
   one channel, queried and merged by `library.fetch_channels`). Empty filter
   fields mean "no filter".
+- **Two channel sources** (`source`, `channels.SOURCES`): `filter` (default —
+  the `genres`/`studios`/`year_from`/`year_to` fields above) or
+  `smartplaylist`, which instead sources the channel from an existing Kodi
+  Smart Playlist (`.xsp` file):
+  ```json
+  {
+    "id": "libtv.custom.2", "name": "80s Action", "type": "movies",
+    "genres": [], "studios": [], "year_from": null, "year_to": null,
+    "order": "random", "source": "smartplaylist",
+    "playlist_path": "special://profile/playlists/video/80s.xsp",
+    "playlist_name": "80s Action"
+  }
+  ```
+  A `smartplaylist` channel's `genres`/`studios`/`year_from`/`year_to` stay
+  present but unused (the dict shape stays uniform rather than becoming a
+  variant-typed union). `type` is inferred from the `.xsp`'s own root `type`
+  attribute at pick-time (`library.fetch_playlists`), not chosen separately.
+  **Evaluation is delegated to Kodi itself**: `library.fetch_playlist_items`
+  calls JSON-RPC `Files.GetDirectory` with the playlist's own `special://`
+  path (`directory`), `media: "video"`, and the same property list the
+  filter path requests — Kodi evaluates the playlist's rules server-side and
+  returns matching items, exactly as if its own Smart Playlist editor had
+  browsed that file. This was a deliberate choice over reimplementing Kodi's
+  smart-playlist rule engine (field/operator/group vocabulary) in Python:
+  ~10 lines that automatically support every rule Kodi's own editor offers,
+  at the cost of being a JSON-RPC technique new to this codebase and **not
+  yet live-verified** (see `docs/live-testing.md`). Only `.xsp` files whose
+  root `type` is `movies` or `episodes` are offered by
+  `library.fetch_playlists()` — these map directly onto LibTV's own channel
+  `type`s; show-level (`tvshows`) smart playlists are out of scope (§11).
+  LibTV's own `order` (day-stable random / az / newest, via
+  `channels.build_sort`) still applies on top of whatever the playlist
+  matched, exactly like the filter path — the playlist's own internal
+  `<limit>`/`<order>`, if any, is whatever Kodi applies before returning
+  results and isn't something LibTV inspects or overrides.
 - **List order is channel order** — it drives the M3U order and therefore the
   guide order. Reordering is just reordering the list.
 - **Ids are allocated once and never change or get reused**: the
@@ -88,7 +123,8 @@ deleted every channel.
   channel type and genre label, so re-running autotune for the same
   type+genre always maps onto the same channel rather than creating a
   duplicate.
-- Filters translate to Kodi JSON-RPC `List.Filter` clauses
+- For `filter`-sourced channels, filters translate to Kodi JSON-RPC
+  `List.Filter` clauses
   (`channels.build_filter`) and run server-side in Kodi's database: genres and
   studios OR within a field (`is` matches membership on multi-value fields),
   dimensions AND together, and year bounds become exclusive
@@ -111,6 +147,17 @@ deleted every channel.
   `library.fetch_studios` — JSON-RPC has no `GetStudios`, so studios are
   aggregated from movie/show items); for a `mixed` channel these union the
   movie and tvshow results.
+- **Choosing a source**: `manage.add_channel` first asks *Filter* or *Smart
+  playlist*. Filter continues into the existing type-picker/`_edit_filters`
+  flow. Smart playlist calls `manage._pick_playlist` (`dialog.select` over
+  `library.fetch_playlists()`'s results, labelled `"<name> (<Movies|TV
+  episodes>)"`) — if none exist, a notification says so rather than
+  presenting an empty picker — then asks the channel name (prefilled with
+  the playlist's own `<name>`) and order. `channel_options`'s second menu
+  item is `"Change smart playlist & order"` (re-running `_pick_playlist`,
+  preselecting the channel's current playlist) instead of `"Edit filters &
+  order"` for a `smartplaylist`-sourced channel — both still count as
+  `content_changed=True` below.
 - **Diff-driven invalidation**: `manage._apply(definitions, content_changed)`
   is the single choke point every mutation goes through.
   `content_changed=True` (add a channel, edit filters & order, autotune —
@@ -138,11 +185,13 @@ deleted every channel.
 - **Channel preview**: right after editing filters/order (add or edit flow,
   before the channel is actually saved), `manage._preview_match_count` shows
   a non-blocking notification with how many library items the current
-  filter combination matches (`library.count_matches` — a `List.Filter`
-  query per media kind with `properties: []` and a zero-width `limits`
-  window, reading Kodi's own `limits.total` rather than fetching items).
-  Catches an over-narrow (or accidentally unfiltered) channel before it's
-  committed, without the cost of a full `fetch_channels`-style dry run.
+  source currently matches (`library.count_matches` — for `filter` sources,
+  a `List.Filter` query per media kind; for `smartplaylist` sources, a
+  `Files.GetDirectory` call on the playlist's path — both with
+  `properties: []` and a zero-width `limits` window, reading Kodi's own
+  `limits.total` rather than fetching items). Catches an over-narrow (or
+  accidentally unfiltered/empty-matching) channel before it's committed,
+  without the cost of a full `fetch_channels`-style dry run.
 - **Opening the management UI from settings**: the settings screen's
   "Manage channels" button cannot bind directly to
   `ActivateWindow(Videos,…?action=channels,return)` in its `<data>` — the
@@ -825,8 +874,23 @@ default in `tests/conftest.py` `SETTINGS`.
   regeneration loop or the manual build action — see
   `docs/live-testing.md` for the checklist to clear before considering that
   promotion.
-- Possible future channel sources: per-show channels, smart-playlist-backed
-  channels, tag filters, decade-based autotune.
+- **Smart-playlist-backed channels (§3) — implemented and unit-tested but
+  not yet live-verified**: `library.fetch_playlist_items`/`fetch_playlists`
+  delegate playlist evaluation to Kodi via JSON-RPC `Files.GetDirectory` on
+  the `.xsp`'s `special://` path, a technique new to this codebase (unlike
+  the filter path's `VideoLibrary.Get*`/`List.Filter`, which is
+  well-exercised). Needs confirming live that `Files.GetDirectory` actually
+  evaluates a playlist's rules and returns matching items with the
+  requested properties (runtime in particular, given the existing
+  `streamdetails` trap) rather than e.g. just the `.xsp` file itself — see
+  `docs/live-testing.md`.
+- Only `movies`/`episodes`-type smart playlists are supported; show-level
+  (`tvshows`) smart playlists are out of scope — `library.fetch_playlists`
+  filters them out rather than presenting a channel type that would need
+  evaluating at the show level and expanding to episodes, a meaningfully
+  different fetch shape.
+- Possible future channel sources: per-show channels, tag filters,
+  decade-based autotune.
 - `star-rating`/`new`/`xmltv_ns` XMLTV fields (§5) depend on the library
   reporting `rating`/`playcount` — not unit-testable against a real scraper's
   actual field coverage; spot-check against a live library.

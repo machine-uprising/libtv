@@ -4,7 +4,7 @@ No Kodi imports. A channel definition looks like:
 
     {"id": "libtv.custom.1", "name": "80s Action", "type": "movies",
      "genres": ["Action"], "studios": [], "year_from": 1980, "year_to": 1989,
-     "order": "random"}
+     "order": "random", "source": "filter", "playlist_path": "", "playlist_name": ""}
 
 `type` is "movies", "episodes", or "mixed" (both movies and episodes in one
 channel). Empty filter fields mean "no filter". `order` controls which items
@@ -22,6 +22,14 @@ same channel rather than duplicating it — genre-facet autotune uses
 "libtv.auto.studio.<type>.<slug>" (see `auto_studio_id`), kept in a separate
 sub-namespace so the two facets' channels can never collide or shadow each
 other.
+
+`source` is "filter" (default — the genres/studios/year_from/year_to fields
+above) or "smartplaylist", in which case `playlist_path` (a special:// path
+to a Kodi Smart Playlist .xsp file) and `playlist_name` (its display name)
+drive the channel instead — see `library.fetch_playlists`/
+`fetch_playlist_items`. The filter fields stay present but unused (empty) on
+a smartplaylist-sourced channel rather than making the dict a variant-typed
+union. `order` still applies on top of either source.
 """
 from __future__ import annotations
 
@@ -29,6 +37,7 @@ import json
 import re
 
 TYPES = ("movies", "episodes", "mixed")
+SOURCES = ("filter", "smartplaylist")
 
 # "random" draws a day-stable random sample from the whole filtered library
 # (library.fetch_channels + schedule.shuffled) — the only order that isn't
@@ -53,10 +62,10 @@ def default_lineup():
     return [
         {"id": "libtv.movies", "name": "Movies", "type": "movies",
          "genres": [], "studios": [], "year_from": None, "year_to": None,
-         "order": "random"},
+         "order": "random", "source": "filter", "playlist_path": "", "playlist_name": ""},
         {"id": "libtv.tv", "name": "TV Shows", "type": "episodes",
          "genres": [], "studios": [], "year_from": None, "year_to": None,
-         "order": "random"},
+         "order": "random", "source": "filter", "playlist_path": "", "playlist_name": ""},
     ]
 
 
@@ -82,6 +91,9 @@ def _normalize(entry):
         "year_from": _year(entry.get("year_from")),
         "year_to": _year(entry.get("year_to")),
         "order": entry.get("order") if entry.get("order") in ORDERS else "random",
+        "source": entry.get("source") if entry.get("source") in SOURCES else "filter",
+        "playlist_path": str(entry.get("playlist_path") or ""),
+        "playlist_name": str(entry.get("playlist_name") or ""),
     }
 
 
@@ -186,14 +198,17 @@ def group(defn):
 
 def describe(defn):
     """One-line human summary of a channel's source, filters, and order."""
-    parts = [_KIND_LABELS[defn["type"]]]
-    if defn.get("genres"):
-        parts.append(", ".join(defn["genres"]))
-    if defn.get("studios"):
-        parts.append(", ".join(defn["studios"]))
-    year_from, year_to = defn.get("year_from"), defn.get("year_to")
-    if year_from or year_to:
-        parts.append(f"{year_from or '…'}–{year_to or '…'}")
+    if defn.get("source") == "smartplaylist":
+        parts = [f"Smart playlist: {defn.get('playlist_name') or '?'}"]
+    else:
+        parts = [_KIND_LABELS[defn["type"]]]
+        if defn.get("genres"):
+            parts.append(", ".join(defn["genres"]))
+        if defn.get("studios"):
+            parts.append(", ".join(defn["studios"]))
+        year_from, year_to = defn.get("year_from"), defn.get("year_to")
+        if year_from or year_to:
+            parts.append(f"{year_from or '…'}–{year_to or '…'}")
     order_label = _ORDER_LABELS.get(defn.get("order"))
     if order_label:
         parts.append(order_label)

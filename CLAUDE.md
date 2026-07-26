@@ -47,8 +47,13 @@ work through its checklist — it maps which document owns what.
 - `resources/lib/libtv/` — the actual code:
   - `schedule.py`, `writers.py`, `channels.py` — **pure logic, no Kodi
     imports** (keep it that way); `channels.py` owns the channel-lineup
-    config (`channels.json`) and JSON-RPC filter building
-  - `library.py` — JSON-RPC library queries (filtered per channel definition)
+    config (`channels.json`), JSON-RPC filter building, and the two channel
+    sources (`SOURCES`: `filter` / `smartplaylist`)
+  - `library.py` — JSON-RPC library queries (filtered per channel
+    definition); for `smartplaylist`-sourced channels, `fetch_playlists`/
+    `fetch_playlist_items` instead list and evaluate an existing Kodi Smart
+    Playlist (`.xsp`) via `Files.GetDirectory` — see the hard-constraints
+    note below and `docs/architecture.md` §3
   - `generator.py` — orchestration: build schedule, write
     M3U/XMLTV/schedule.json (`regenerate`, full library fetch) or patch just
     the schedule's channel metadata in place without a fetch
@@ -69,8 +74,9 @@ work through its checklist — it maps which document owns what.
     bind straight to `ActivateWindow` from within that dialog (see "Known
     gaps" below)
   - `manage.py` — dialog-driven channel management UI (with a match-count
-    preview before saving a channel's filters) + genre- and studio-based
-    autotune
+    preview before saving a channel's filters or smart playlist) + genre-
+    and studio-based autotune; `add_channel` asks Filter vs. Smart playlist
+    up front
   - `daemon.py` — background regeneration loop (`xbmc.Monitor`-based),
     self-healing PVR-refresh retry, join-in-progress seek + observed-runtime
     recording (`JoinInProgressPlayer`)
@@ -290,6 +296,24 @@ encouraged for diagnosis.
   overwritten — `configure_iptv_simple()` returns `"exists_different"` and
   `plugin.auto_configure_iptv_simple()` confirms with the user
   (`Dialog().yesno()`) before retrying with `force=True`.
+- **Smart-playlist channels (`channels.SOURCES` `"smartplaylist"`) evaluate
+  the `.xsp` via JSON-RPC `Files.GetDirectory`, not by reimplementing Kodi's
+  smart-playlist rule engine** — `directory` set to the playlist's own
+  `special://profile/playlists/video/...xsp` path, `media: "video"`,
+  `properties` the same list the filter path requests. This is the same
+  technique Kodi's own skins/widgets use to browse a smart playlist's
+  contents, and it means every rule Kodi's Smart Playlist editor supports
+  (any field/operator/group combination) works automatically, with zero
+  LibTV-side rule parsing. **Not yet live-verified** — unlike the
+  `VideoLibrary.Get*`/`List.Filter` path this project has exercised
+  extensively, this is a new JSON-RPC surface for this codebase; see
+  `docs/live-testing.md`. Playlist discovery (`library.fetch_playlists`)
+  reads `.xsp` files directly off disk (`xbmcvfs.translatePath` +
+  `xbmcvfs.listdir` + plain `open()`, the same pattern
+  `generator._find_pvr_instance` already uses for reading another
+  component's XML) rather than over JSON-RPC, and only offers playlists
+  whose root `type` is `movies` or `episodes` — `tvshows`-type (show-level)
+  smart playlists are out of scope (§11 of `docs/architecture.md`).
 
 ## Design invariants
 
@@ -580,6 +604,17 @@ see `docs/live-testing.md` for the checklist.
   LibTV's own. Deliberately not wired into the automatic regeneration loop
   or the manual build action pending that verification — see
   `docs/architecture.md` §7 and `docs/live-testing.md`.
+- **Smart-playlist-backed channels (`channels.SOURCES` `"smartplaylist"`,
+  `library.fetch_playlists`/`fetch_playlist_items`, `manage._pick_playlist`/
+  `_edit_playlist`) — implemented and unit-tested but carries the same kind
+  of risk `configure_iptv_simple()` did until live-verified**: playlist
+  evaluation relies on JSON-RPC `Files.GetDirectory` actually evaluating a
+  smart playlist's rules and returning matching items with the requested
+  properties (this project has not used `Files.GetDirectory` anywhere
+  before), rather than e.g. returning the `.xsp` file itself unevaluated —
+  see `docs/architecture.md` §3/§11 and `docs/live-testing.md`. Only
+  `movies`/`episodes`-type playlists are offered; `tvshows`-type (show-
+  level) smart playlists are out of scope.
 - XMLTV `star-rating`/`new`/`xmltv_ns` fields depend on the library actually
   reporting `rating`/`playcount` for an item — not yet spot-checked against a
   real scraper's field coverage.

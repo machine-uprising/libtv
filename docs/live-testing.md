@@ -82,6 +82,11 @@ confirm it reads correctly before working through the steps below by hand.
    plus any custom channels from `channels.json` — should appear with a
    populated guide.
 
+If channels play but the guide is empty, see `docs/epg-diagnostics.md` for
+a dedicated step-by-step runbook (channel-id matching, XMLTV timezone
+handling, and the auto-configure `special://`/cache settings are all ruled
+in/out there in order).
+
 ## 4a. IPTV Simple auto-configuration (`configure_iptv_simple`)
 
 **Read this before testing.** This feature writes a file directly into
@@ -184,6 +189,68 @@ throwaway/test Kodi profile if you have one available.
 Once all of this is confirmed, `configure_iptv_simple()` can be considered
 for wiring into the automatic regeneration loop or the manual build action
 (currently deliberately not automatic — see `docs/architecture.md` §7).
+
+## 4b. Smart-playlist channels (`Files.GetDirectory`)
+
+**Read this before testing.** Smart-playlist-backed channels
+(`docs/architecture.md` §3) evaluate an existing Kodi Smart Playlist by
+calling JSON-RPC `Files.GetDirectory` with the `.xsp`'s own `special://`
+path — a technique this codebase has never used before (unlike
+`VideoLibrary.GetMovies`/`GetEpisodes` + `List.Filter`, which is
+well-exercised). The whole feature hinges on `Files.GetDirectory` actually
+evaluating the playlist's rules server-side and returning matching items
+with the properties LibTV requests, rather than e.g. returning the `.xsp`
+file itself unevaluated, an empty result, or an error.
+
+1. In Kodi, use the built-in **Smart playlist editor** (Videos → context
+   menu, or via a video widget) to create at least one **Movies**-type and
+   one **Episodes**-type smart playlist with a rule you can sanity-check by
+   eye (e.g. "Genre is Action" or "Year is greater than 2015"), and save
+   each with a distinct name. Also create (or note if you already have) a
+   **TV shows**-type smart playlist — used in step 6 to confirm it's
+   correctly excluded.
+2. From LibTV's **Manage channels** → **+ Add channel**, pick **Smart
+   playlist** as the source. Confirm:
+   - Both the Movies- and Episodes-type playlists you created appear in the
+     picker, labelled with their name and `(Movies)`/`(TV episodes)`.
+   - The TV-shows-type playlist does **not** appear (out of scope — see
+     `docs/architecture.md` §11).
+   - Picking one prefills the channel-name prompt with the playlist's own
+     name.
+3. Confirm a channel gets created, and check `kodi.log` for the
+   `Files.GetDirectory` JSON-RPC call (enable debug logging first) — its
+   `directory` param should be the `special://profile/playlists/video/...`
+   path of the playlist you picked.
+4. **The critical check**: open the TV guide and confirm the new channel's
+   programmes are actually items matching your playlist's rule (spot-check
+   at least 2-3 against Kodi's own video library view filtered the same
+   way), **not** empty, **not** every item in the library unfiltered, and
+   **not** an error/placeholder entry. This is the one thing unit tests
+   (which only fake the JSON-RPC response) cannot prove — it's the live
+   behavior of `Files.GetDirectory` itself under test here.
+5. **Runtime/duration check**: confirm the new channel's guide slots show
+   real durations matching the files, not a uniform 90-minute default — the
+   same `streamdetails`-must-be-requested trap that bit `GetEpisodes`
+   directly (`CLAUDE.md`) may or may not apply the same way through
+   `Files.GetDirectory`; this needs its own confirmation, not an assumption
+   that the fix already covers it.
+6. **Preview count**: while adding the channel, confirm the "N items match
+   this channel" notification (`manage._preview_match_count`) shows a
+   number consistent with what actually got scheduled — this exercises a
+   *second*, separate `Files.GetDirectory` call (zero-width `limits`,
+   `properties: []`), so it's worth confirming independently of step 4.
+7. **Edit flow**: from the new channel's options, confirm the second menu
+   item reads **"Change smart playlist & order"** (not "Edit filters &
+   order"), pick a different playlist, and confirm the channel's guide
+   content changes to match on the next rebuild.
+8. **Content order**: set the channel's order to **A–Z** or **Recently
+   added** and confirm the guide reflects a sorted/capped result (same
+   check as the filter-path equivalent in §5 below, but exercising the
+   `Files.GetDirectory` `sort`/`limits` params instead of `List.Sort`).
+9. **A channel with zero matches**: pick/create a smart playlist whose rule
+   matches nothing in your library, add it as a channel, and confirm the
+   preview count reports 0 and the channel simply has no programmes rather
+   than erroring.
 
 ## 5. What to verify (the things unit tests can't)
 
@@ -368,6 +435,10 @@ for wiring into the automatic regeneration loop or the manual build action
     either rebuild deleting the other's channels — e.g. run genre autotune
     for Movies, then studio autotune for Movies, and confirm both sets of
     channels are present in the guide afterward.
+  - **Add a smart-playlist channel** — see §4b for the dedicated checklist;
+    this is the highest-risk new surface in this list, since
+    `Files.GetDirectory` playlist evaluation is a JSON-RPC technique this
+    codebase has never exercised live before.
 - **IPTV Simple Client setup paths dialog** — from either the add-on's main
   menu or the settings button ("Guide & playback" → **IPTV Simple Client
   setup paths**), confirm a text dialog opens showing the `special://`

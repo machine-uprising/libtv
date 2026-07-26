@@ -7,6 +7,7 @@ import sys
 
 from libtv import channels as channels_module
 from libtv import generator
+from libtv import library as library_module
 
 from tests import conftest
 
@@ -25,12 +26,32 @@ EPISODES = {
 GENRES = {"genres": [{"label": "Action"}, {"label": "Comedy"}]}
 TVSHOWS = {"tvshows": [{"studio": ["Network X"]}]}
 
+_PLAYLIST_PICK = {
+    "path": "special://profile/playlists/video/80s.xsp", "name": "80s Action", "type": "movies",
+}
+
 
 def _with_library(monkeypatch):
     monkeypatch.setitem(conftest.JSONRPC_RESPONSES, "VideoLibrary.GetMovies", MOVIES)
     monkeypatch.setitem(conftest.JSONRPC_RESPONSES, "VideoLibrary.GetEpisodes", EPISODES)
     monkeypatch.setitem(conftest.JSONRPC_RESPONSES, "VideoLibrary.GetGenres", GENRES)
     monkeypatch.setitem(conftest.JSONRPC_RESPONSES, "VideoLibrary.GetTVShows", TVSHOWS)
+
+
+def _with_playlists(monkeypatch, playlists):
+    monkeypatch.setattr(library_module, "fetch_playlists", lambda: playlists)
+
+
+def _seed_smartplaylist_channel():
+    defn = {
+        "id": "libtv.custom.1", "name": "80s Action", "type": "movies",
+        "genres": [], "studios": [], "year_from": None, "year_to": None,
+        "order": "random", "source": "smartplaylist",
+        "playlist_path": "special://profile/playlists/video/80s.xsp",
+        "playlist_name": "80s Action",
+    }
+    generator.save_channel_defs([defn])
+    return defn
 
 
 def _run_plugin(monkeypatch, query):
@@ -53,7 +74,7 @@ def test_manage_list_shows_add_and_channel_items(monkeypatch):
 
 def test_add_channel_flow_saves_filters_and_rebuilds(monkeypatch):
     _with_library(monkeypatch)
-    conftest.DIALOG_RESPONSES["select"].append(0)  # type: Movies
+    conftest.DIALOG_RESPONSES["select"].extend([0, 0])  # source: Filter, type: Movies
     conftest.DIALOG_RESPONSES["input"].extend(["80s Action", "1980", "1989"])
     conftest.DIALOG_RESPONSES["multiselect"].append([0])  # genres: Action
     # No answer queued for the studio picker that follows -> treated as
@@ -67,7 +88,7 @@ def test_add_channel_flow_saves_filters_and_rebuilds(monkeypatch):
     assert added[0] == {
         "id": "libtv.custom.1", "name": "80s Action", "type": "movies",
         "genres": ["Action"], "studios": [], "year_from": 1980, "year_to": 1989,
-        "order": "random",
+        "order": "random", "source": "filter", "playlist_path": "", "playlist_name": "",
     }
     # Rebuilt immediately: the new channel is live in the schedule.
     schedule = generator.load_schedule()
@@ -80,7 +101,7 @@ def test_add_channel_flow_saves_filters_and_rebuilds(monkeypatch):
 
 def test_add_mixed_channel_pulls_movies_and_episodes(monkeypatch):
     _with_library(monkeypatch)
-    conftest.DIALOG_RESPONSES["select"].append(2)  # type: Mixed
+    conftest.DIALOG_RESPONSES["select"].extend([0, 2])  # source: Filter, type: Mixed
     conftest.DIALOG_RESPONSES["input"].extend(["Everything", "", ""])
     conftest.DIALOG_RESPONSES["multiselect"].append([])  # genres: none
 
@@ -91,7 +112,7 @@ def test_add_mixed_channel_pulls_movies_and_episodes(monkeypatch):
     assert added == [{
         "id": "libtv.custom.1", "name": "Everything", "type": "mixed",
         "genres": [], "studios": [], "year_from": None, "year_to": None,
-        "order": "random",
+        "order": "random", "source": "filter", "playlist_path": "", "playlist_name": "",
     }]
     schedule = generator.load_schedule()
     ch = next(c for c in schedule["channels"] if c["id"] == "libtv.custom.1")
@@ -425,6 +446,99 @@ def test_autotune_studio_cancelled_at_type_picker_changes_nothing(monkeypatch):
 
     assert not os.path.exists(generator.channels_path())
     assert not _refreshed()
+
+
+def test_add_smartplaylist_channel_flow(monkeypatch):
+    monkeypatch.setitem(conftest.JSONRPC_RESPONSES, "Files.GetDirectory", {
+        "files": [{"title": "Movie A", "file": "/media/a.mkv", "runtime": 6000, "plot": "A"}],
+        "limits": {"start": 0, "end": 1, "total": 1},
+    })
+    _with_playlists(monkeypatch, [_PLAYLIST_PICK])
+    conftest.DIALOG_RESPONSES["select"].extend([1, 0])  # source: Smart playlist; pick playlist 0
+    conftest.DIALOG_RESPONSES["input"].append("80s Action")  # channel name (prefilled)
+    # No answer queued for the order picker -> keeps the default "random".
+
+    _run_plugin(monkeypatch, "?action=channel_add")
+
+    defs = generator.load_channel_defs()
+    added = [d for d in defs if d["id"] == "libtv.custom.1"]
+    assert added == [{
+        "id": "libtv.custom.1", "name": "80s Action", "type": "movies",
+        "genres": [], "studios": [], "year_from": None, "year_to": None,
+        "order": "random", "source": "smartplaylist",
+        "playlist_path": "special://profile/playlists/video/80s.xsp",
+        "playlist_name": "80s Action",
+    }]
+    schedule = generator.load_schedule()
+    ch = next(c for c in schedule["channels"] if c["id"] == "libtv.custom.1")
+    assert {p["title"] for p in ch["programmes"]} == {"Movie A"}
+    notes = [c for c in conftest.CALLS if c[0] == "xbmcgui.notification"]
+    assert ("xbmcgui.notification", "LibTV", "1 item matches this channel") in notes
+    assert _refreshed()
+
+
+def test_add_smartplaylist_no_playlists_available_notifies(monkeypatch):
+    _with_playlists(monkeypatch, [])
+    conftest.DIALOG_RESPONSES["select"].append(1)  # source: Smart playlist
+
+    _run_plugin(monkeypatch, "?action=channel_add")
+
+    assert not os.path.exists(generator.channels_path())
+    notes = [c for c in conftest.CALLS if c[0] == "xbmcgui.notification"]
+    assert len(notes) == 1
+    assert "No compatible smart playlists found" in notes[0][2]
+
+
+def test_add_smartplaylist_cancelled_at_picker_changes_nothing(monkeypatch):
+    _with_playlists(monkeypatch, [_PLAYLIST_PICK])
+    conftest.DIALOG_RESPONSES["select"].append(1)  # source: Smart playlist
+    # No answer queued for the playlist picker -> user cancels.
+
+    _run_plugin(monkeypatch, "?action=channel_add")
+
+    assert not os.path.exists(generator.channels_path())
+    notes = [c for c in conftest.CALLS if c[0] == "xbmcgui.notification"]
+    assert notes == [], "cancelling the picker must not show the empty-state notice"
+
+
+def test_channel_options_menu_shows_playlist_label_for_smartplaylist_channel(monkeypatch):
+    _seed_smartplaylist_channel()
+    # No select answer queued -> cancels the action menu; we only inspect
+    # what heading/options it was shown.
+    _run_plugin(monkeypatch, "?action=channel_options&channel=libtv.custom.1")
+
+    select_calls = [c for c in conftest.CALLS if c[0] == "xbmcgui.select" and c[1] == "80s Action"]
+    assert select_calls
+    assert "Change smart playlist & order" in select_calls[0][2]
+    assert "Edit filters & order" not in select_calls[0][2]
+
+
+def test_edit_smartplaylist_channel_changes_playlist_and_refetches(monkeypatch):
+    _seed_smartplaylist_channel()
+    new_playlist = {
+        "path": "special://profile/playlists/video/new.xsp", "name": "New Playlist",
+        "type": "episodes",
+    }
+    _with_playlists(monkeypatch, [_PLAYLIST_PICK, new_playlist])
+    monkeypatch.setitem(conftest.JSONRPC_RESPONSES, "Files.GetDirectory", {
+        "files": [{"title": "Ep1", "file": "/e1.mkv", "runtime": 1200}],
+        "limits": {"total": 1},
+    })
+    conftest.DIALOG_RESPONSES["select"].extend([1, 1])  # menu: edit; playlist pick: New Playlist
+
+    _run_plugin(monkeypatch, "?action=channel_options&channel=libtv.custom.1")
+
+    defs = generator.load_channel_defs()
+    edited = next(d for d in defs if d["id"] == "libtv.custom.1")
+    assert edited["playlist_path"] == "special://profile/playlists/video/new.xsp"
+    assert edited["playlist_name"] == "New Playlist"
+    assert edited["type"] == "episodes"
+    fetch_calls = [
+        c for c in conftest.CALLS
+        if c[1] in ("VideoLibrary.GetMovies", "VideoLibrary.GetEpisodes")
+    ]
+    assert fetch_calls == [], "a smart-playlist channel must not query VideoLibrary directly"
+    assert _refreshed()
 
 
 def test_delete_channel_requires_confirmation(monkeypatch):

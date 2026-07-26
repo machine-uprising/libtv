@@ -5,6 +5,8 @@ is also requested; episode scrapers often supply no runtime at all, so
 without it whole shows come back runtime=0 and get 90-minute default slots.
 """
 
+import os
+
 from tests import conftest
 
 EPISODES = {
@@ -203,3 +205,110 @@ def test_fetch_studios_mixed_unions_movie_and_tvshow_studios(monkeypatch):
     monkeypatch.setattr(library, "json_rpc", fake_json_rpc)
 
     assert library.fetch_studios("mixed") == ["A24", "HBO"]
+
+
+def _write_xsp(path, kodi_type, name):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(f'<smartplaylist type="{kodi_type}"><name>{name}</name></smartplaylist>')
+
+
+def test_fetch_playlists_lists_movies_and_episodes_and_skips_other_types(tmp_path, monkeypatch):
+    from libtv import library
+
+    monkeypatch.setattr(library, "_playlists_root_os", lambda: str(tmp_path))
+    _write_xsp(os.path.join(tmp_path, "80s.xsp"), "movies", "80s Action")
+    _write_xsp(os.path.join(tmp_path, "movies", "comedy.xsp"), "movies", "Comedies")
+    _write_xsp(os.path.join(tmp_path, "tvshows", "unwatched.xsp"), "tvshows", "Unwatched Shows")
+
+    playlists = library.fetch_playlists()
+
+    by_path = {p["path"]: p for p in playlists}
+    assert by_path["special://profile/playlists/video/80s.xsp"] == {
+        "path": "special://profile/playlists/video/80s.xsp", "name": "80s Action", "type": "movies",
+    }
+    assert "special://profile/playlists/video/movies/comedy.xsp" in by_path
+    assert not any(p["type"] == "tvshows" for p in playlists), \
+        "show-level smart playlists are out of scope for v1"
+    assert len(playlists) == 2
+
+
+def test_fetch_playlists_falls_back_to_filename_when_name_missing(tmp_path, monkeypatch):
+    from libtv import library
+
+    monkeypatch.setattr(library, "_playlists_root_os", lambda: str(tmp_path))
+    with open(os.path.join(tmp_path, "nameless.xsp"), "w", encoding="utf-8") as f:
+        f.write('<smartplaylist type="episodes"></smartplaylist>')
+
+    playlists = library.fetch_playlists()
+
+    assert playlists == [{
+        "path": "special://profile/playlists/video/nameless.xsp",
+        "name": "nameless", "type": "episodes",
+    }]
+
+
+def test_fetch_channels_smartplaylist_source_uses_files_getdirectory(monkeypatch):
+    from libtv import library
+
+    monkeypatch.setitem(conftest.JSONRPC_RESPONSES, "Files.GetDirectory", {
+        "files": [{"title": "Movie A", "file": "/a.mkv", "runtime": 6000}],
+    })
+    defs = [{"id": "libtv.custom.1", "name": "80s Action", "type": "movies",
+             "genres": [], "studios": [], "year_from": None, "year_to": None,
+             "order": "random", "source": "smartplaylist",
+             "playlist_path": "special://profile/playlists/video/80s.xsp",
+             "playlist_name": "80s Action"}]
+
+    result = library.fetch_channels(defs, 10, 0)[0]
+
+    assert [it["title"] for it in result["items"]] == ["Movie A"]
+    call = next(c for c in conftest.CALLS if c[1] == "Files.GetDirectory")
+    assert call[2]["directory"] == "special://profile/playlists/video/80s.xsp"
+    assert call[2]["media"] == "video"
+    # "random" order (no server-side sort) must not carry sort/limits, same
+    # invariant as the filter path (day-stable sampling needs the full pool).
+    assert "sort" not in call[2]
+    assert "limits" not in call[2]
+    fetch_calls = [
+        c for c in conftest.CALLS
+        if c[1] in ("VideoLibrary.GetMovies", "VideoLibrary.GetEpisodes")
+    ]
+    assert fetch_calls == [], "a smart-playlist channel must not query VideoLibrary directly"
+
+
+def test_fetch_channels_smartplaylist_source_az_order_sorts_serverside(monkeypatch):
+    from libtv import library
+
+    monkeypatch.setitem(conftest.JSONRPC_RESPONSES, "Files.GetDirectory", {
+        "files": [{"title": "Movie A", "file": "/a.mkv", "runtime": 6000}],
+    })
+    defs = [{"id": "libtv.custom.1", "name": "80s Action", "type": "movies",
+             "genres": [], "studios": [], "year_from": None, "year_to": None,
+             "order": "az", "source": "smartplaylist",
+             "playlist_path": "special://profile/playlists/video/80s.xsp",
+             "playlist_name": "80s Action"}]
+
+    library.fetch_channels(defs, 10, 0)
+
+    call = next(c for c in conftest.CALLS if c[1] == "Files.GetDirectory")
+    assert call[2]["sort"] == {"method": "title", "order": "ascending", "ignorearticle": True}
+    assert call[2]["limits"] == {"start": 0, "end": 10}
+
+
+def test_count_matches_smartplaylist_source(monkeypatch):
+    from libtv import library
+
+    monkeypatch.setitem(conftest.JSONRPC_RESPONSES, "Files.GetDirectory", {
+        "files": [], "limits": {"start": 0, "end": 0, "total": 3},
+    })
+    defn = {"id": "libtv.custom.1", "name": "80s Action", "type": "movies",
+            "genres": [], "studios": [], "year_from": None, "year_to": None,
+            "order": "random", "source": "smartplaylist",
+            "playlist_path": "special://profile/playlists/video/80s.xsp",
+            "playlist_name": "80s Action"}
+
+    assert library.count_matches(defn) == 3
+    call = next(c for c in conftest.CALLS if c[1] == "Files.GetDirectory")
+    assert call[2]["properties"] == []
+    assert call[2]["limits"] == {"start": 0, "end": 0}

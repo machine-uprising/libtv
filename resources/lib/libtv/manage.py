@@ -104,8 +104,42 @@ def _edit_filters(dialog, defn):
     defn["year_to"] = _ask_year(dialog, "Last year (blank = no limit)", defn.get("year_to"))
 
 
+def _edit_playlist(dialog, defn):
+    """Smart-playlist counterpart of _edit_filters: change which playlist
+    backs the channel and/or its content order, mutating defn in place.
+
+    Cancelling the playlist picker keeps the current playlist; cancelling
+    the order picker keeps the current order (same behavior as
+    _edit_filters).
+    """
+    picked = _pick_playlist(dialog, current_path=defn.get("playlist_path"))
+    if picked is not None:
+        defn["playlist_path"] = picked["path"]
+        defn["playlist_name"] = picked["name"]
+        defn["type"] = picked["type"]
+    defn["order"] = _ask_order(dialog, defn.get("order", "random"))
+
+
 _KINDS = ["Movies", "TV shows", "Mixed (Movies & TV shows)"]
 _KIND_TYPES = ["movies", "episodes", "mixed"]
+
+_PLAYLIST_TYPE_LABELS = {"movies": "Movies", "episodes": "TV episodes"}
+
+
+def _pick_playlist(dialog, current_path=None):
+    """Prompt for a Kodi Smart Playlist to source a channel from.
+
+    Returns the chosen {"path", "name", "type"} dict, or None if the user
+    cancelled or no compatible (Movies/TV-episode) smart playlist exists —
+    callers tell the two apart via library.fetch_playlists() being empty.
+    """
+    playlists = library.fetch_playlists()
+    if not playlists:
+        return None
+    labels = [f"{p['name']} ({_PLAYLIST_TYPE_LABELS[p['type']]})" for p in playlists]
+    preselect = next((i for i, p in enumerate(playlists) if p["path"] == current_path), -1)
+    choice = dialog.select("Smart playlist", labels, preselect=preselect)
+    return playlists[choice] if choice >= 0 else None
 
 
 def _preview_match_count(defn):
@@ -122,26 +156,60 @@ def _preview_match_count(defn):
     )
 
 
-def add_channel(handle):
-    dialog = xbmcgui.Dialog()
-    kind = dialog.select("Channel type", _KINDS)
-    if kind < 0:
-        return _done(handle)
-    name = dialog.input("Channel name")
-    if not name:
-        return _done(handle)
-    definitions = generator.load_channel_defs()
-    defn = {
+def _blank_channel(definitions, name, channel_type):
+    return {
         "id": channels.next_id(definitions),
         "name": name,
-        "type": _KIND_TYPES[kind],
+        "type": channel_type,
         "genres": [],
         "studios": [],
         "year_from": None,
         "year_to": None,
         "order": "random",
+        "source": "filter",
+        "playlist_path": "",
+        "playlist_name": "",
     }
-    _edit_filters(dialog, defn)
+
+
+def add_channel(handle):
+    dialog = xbmcgui.Dialog()
+    source = dialog.select("Channel source", ["Filter (genre / studio / year)", "Smart playlist"])
+    if source < 0:
+        return _done(handle)
+
+    definitions = generator.load_channel_defs()
+
+    if source == 1:
+        picked = _pick_playlist(dialog)
+        if picked is None:
+            if not library.fetch_playlists():
+                xbmcgui.Dialog().notification(
+                    "LibTV",
+                    "No compatible smart playlists found — create one as a "
+                    "Movies or TV Episodes smart playlist in Kodi first",
+                    xbmcgui.NOTIFICATION_INFO,
+                    5000,
+                )
+            return _done(handle)
+        name = dialog.input("Channel name", picked["name"])
+        if not name:
+            return _done(handle)
+        defn = _blank_channel(definitions, name, picked["type"])
+        defn["source"] = "smartplaylist"
+        defn["playlist_path"] = picked["path"]
+        defn["playlist_name"] = picked["name"]
+        defn["order"] = _ask_order(dialog, defn["order"])
+    else:
+        kind = dialog.select("Channel type", _KINDS)
+        if kind < 0:
+            return _done(handle)
+        name = dialog.input("Channel name")
+        if not name:
+            return _done(handle)
+        defn = _blank_channel(definitions, name, _KIND_TYPES[kind])
+        _edit_filters(dialog, defn)
+
     _preview_match_count(defn)
     definitions.append(defn)
     _apply(definitions)
@@ -156,13 +224,17 @@ def channel_options(handle, channel_id):
         xbmc.executebuiltin("Container.Refresh")
         return _done(handle)
 
+    edit_label = (
+        "Change smart playlist & order" if defn.get("source") == "smartplaylist"
+        else "Edit filters & order"
+    )
     choice = dialog.select(
-        defn["name"], ["Rename", "Edit filters & order", "Move up", "Move down", "Delete"]
+        defn["name"], ["Rename", edit_label, "Move up", "Move down", "Delete"]
     )
     changed = False
-    # Only "Edit filters & order" can change what the channel fetches; the
-    # rest (rename/reorder/delete) let _apply take the cheap relabel-only
-    # path instead of a full library refetch (generator.relabel_schedule).
+    # Only the edit option can change what the channel fetches; the rest
+    # (rename/reorder/delete) let _apply take the cheap relabel-only path
+    # instead of a full library refetch (generator.relabel_schedule).
     content_changed = False
     if choice == 0:
         name = dialog.input("Channel name", defn["name"])
@@ -170,7 +242,10 @@ def channel_options(handle, channel_id):
             defn["name"] = name
             changed = True
     elif choice == 1:
-        _edit_filters(dialog, defn)
+        if defn.get("source") == "smartplaylist":
+            _edit_playlist(dialog, defn)
+        else:
+            _edit_filters(dialog, defn)
         _preview_match_count(defn)
         changed = True
         content_changed = True
@@ -210,6 +285,9 @@ def _rebuild_autotune(existing, channel_type, genres, selected):
             "year_from": None,
             "year_to": None,
             "order": "random",
+            "source": "filter",
+            "playlist_path": "",
+            "playlist_name": "",
         }
         for genre in genres
         if genre in selected
@@ -274,6 +352,9 @@ def _rebuild_studio_autotune(existing, channel_type, studios, selected):
             "year_from": None,
             "year_to": None,
             "order": "random",
+            "source": "filter",
+            "playlist_path": "",
+            "playlist_name": "",
         }
         for studio in studios
         if studio in selected
