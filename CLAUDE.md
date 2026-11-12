@@ -76,10 +76,12 @@ work through its checklist — it maps which document owns what.
   - `manage.py` — dialog-driven channel management UI (with a match-count
     preview before saving a channel's filters or smart playlist) + genre-
     and studio-based autotune; `add_channel` asks Filter vs. Smart playlist
-    up front
+    up front, and the Smart playlist branch multiselects (one, several, or
+    all at once) rather than one playlist per add
   - `daemon.py` — background regeneration loop (`xbmc.Monitor`-based),
-    self-healing PVR-refresh retry, join-in-progress seek + observed-runtime
-    recording (`JoinInProgressPlayer`)
+    self-healing PVR-refresh retry, join-in-progress seek + settle-guarded
+    observed-runtime recording + end-of-programme channel re-tune
+    (`JoinInProgressPlayer`)
   - `overlay.py` — in-playback EPG overlay: a code-only
     `xbmcgui.WindowDialog` (no skin XML) listing every channel's Now/Next,
     read-only against `schedule.json` (never regenerates or refreshes PVR)
@@ -162,6 +164,11 @@ trees and verifies the built zip contains the key add-on files.
   `.gitignore`). Any new committed media file needs the same treatment, or
   it'll ship with an empty add-on and fail confusingly at runtime instead
   of at build time.
+- **`addon.xml`'s `<news>` has a schema length limit (~1500 chars)** —
+  letting release notes accumulate across versions eventually fails
+  `kodi-addon-checker` with `Schema validation failed: xbmc.addon.metadata`
+  (hit at v0.13.0 with ~3800 chars). Keep only the latest release or two in
+  `<news>`; older entries live in git history.
 
 ## The live Kodi is production — never modify it in place
 
@@ -206,12 +213,26 @@ encouraged for diagnosis.
   `streamdetails` from `library.py`'s property lists silently reverts every
   episode to the 90-minute default slot and breaks the join-in-progress
   seek. `scripts/sanity_check.py` mirrors the property lists; keep in sync.
-  As a second line of defense, `library._resolve_runtime` also falls back to
-  an observed-playback-duration cache (`generator.record_observed_runtime`,
-  written from `daemon.JoinInProgressPlayer.onAVStarted`) before giving up
-  and using the 90-minute default — this does not remove the need to keep
-  `streamdetails` requested, since the cache only has data for files that
-  have actually played at least once.
+- **A non-zero scraped `runtime` can be WRONG, not just missing** —
+  scrapers routinely stamp episodes with the show's *nominal broadcast
+  slot* (exactly 30 minutes) even when the files run 7-8 minutes
+  (user-reported live on Linux: short episodes drew 30+-minute guide bars
+  and playback drifted ahead of the guide). `library._resolve_runtime`
+  therefore ranks **measured durations above scraped metadata**:
+  streamdetails file duration → observed-playback cache
+  (`generator.record_observed_runtime`, written from
+  `daemon.JoinInProgressPlayer.onAVStarted`) → scraped `runtime` → the
+  90-minute default. Don't "simplify" this back to trusting a truthy
+  `runtime` first. This does not remove the need to keep `streamdetails`
+  requested — the cache only has data for files that have actually played
+  at least once.
+- **Don't trust a single `Player().getTotalTime()` read in `onAVStarted`**
+  — right after a channel change it can still report the *previous* item's
+  duration while `getPlayingFile()` already names the new file, which would
+  cache the wrong duration under the correct filename (and the observed
+  cache outranks scraped runtimes, so the poison would stick).
+  `daemon.onAVStarted` re-reads after `TOTAL_TIME_SETTLE_MS` and skips
+  recording if the file changed between reads.
 - `default.py`, `service.py`, and `context.py` must stay ≤15 counted lines
   (kodi-addon-checker "complex entry point" rule) — logic goes in
   `resources/lib/libtv/`.
@@ -555,9 +576,32 @@ see `docs/live-testing.md` for the checklist.
   actually resolves the visibility problem live — see
   `docs/live-testing.md` §4a.
 
-## Known gaps (as of 2026-07)
+## Known gaps (as of 2026-11)
 
 - No icon/fanart assets yet (checker suggests adding them).
+- **User-reported (live, 2026-11): short episodes (7-8 min) drew 30+-minute
+  guide bars, and the guide drifted out of sync with actual playback.**
+  Root cause: scrapers stamp episodes with the show's nominal broadcast
+  slot, and a wrong-but-truthy scraped `runtime` used to beat every real
+  measurement (see the hard-constraints bullet). **Fix**:
+  `library._resolve_runtime` now ranks streamdetails → observed cache →
+  scraped runtime, and `daemon.onAVStarted` settle-guards the observed-cache
+  write against stale `getTotalTime()` reads. **Not yet live-verified** —
+  see `docs/live-testing.md` §5.
+- **User-reported (live, 2026-11, both Linux and Windows): a programme
+  reaching its natural end sometimes dropped Kodi back to the guide/home
+  instead of continuing with the next scheduled programme.** Root cause:
+  each tune resolves to a plain finite file and nothing handled EOF — the
+  intermittent "it continued fine" cases were Kodi's own PVR stream-reopen
+  winning a race LibTV wasn't even in. **Fix**:
+  `daemon.JoinInProgressPlayer.onPlayBackEnded` re-tunes the tracked
+  channel via JSON-RPC `Player.Open`, with a same-file loop guard (a slot
+  that outlives its real file must NOT re-tune into a 10-second-tail
+  replay loop), a rate limit (`RETUNE_MIN_INTERVAL`), and a grace wait so
+  Kodi's own reopen isn't double-tuned over — `docs/architecture.md` §6.
+  `onPlayBackStopped`/`onPlayBackError` clear the tracking so user stops
+  and channel changes are never re-tuned over. **Not yet live-verified** —
+  see `docs/live-testing.md` §5b.
 - The channel management UI (custom channels, filters, reorder, the
   diff-driven invalidation that skips a library refetch for rename/move/
   delete), genre- and studio-based autotune (`manage.autotune_genres`,

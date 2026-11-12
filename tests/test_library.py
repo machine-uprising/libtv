@@ -1,8 +1,11 @@
-"""library.py: property lists and the stream-details runtime fallback.
+"""library.py: property lists and runtime resolution precedence.
 
 Kodi only fills episode `runtime` from stream details when `streamdetails`
 is also requested; episode scrapers often supply no runtime at all, so
 without it whole shows come back runtime=0 and get 90-minute default slots.
+Measured durations (streamdetails, observed playback) outrank scraped
+runtimes — scrapers routinely stamp episodes with the show's nominal
+broadcast slot (e.g. exactly 30 minutes) even when the files run 7-8 min.
 """
 
 import os
@@ -11,11 +14,11 @@ from tests import conftest
 
 EPISODES = {
     "episodes": [
-        # Normal case: Kodi already resolved runtime (from scraper or
-        # stream details) — fallback must not override it.
+        # Both a scraped runtime and a measured duration: the measured file
+        # duration wins (the scraped value is a nominal slot length).
         {"title": "Scraped", "file": "/a.mkv", "runtime": 1800,
          "streamdetails": {"video": [{"duration": 1750}]}},
-        # The bug case: no scraped runtime, duration only in stream details.
+        # No scraped runtime, duration only in stream details.
         {"title": "Unscraped", "file": "/b.mkv", "runtime": 0,
          "streamdetails": {"video": [{"duration": 2632}]}},
         # No duration anywhere: stays 0 so schedule.py applies its default.
@@ -23,21 +26,22 @@ EPISODES = {
     ]
 }
 
+_DEFS = [{"id": "libtv.tv", "name": "TV Shows", "type": "episodes",
+          "genres": [], "studios": [], "year_from": None, "year_to": None,
+          # "az" order keeps the fetch order deterministic (Kodi is the one
+          # doing the actual sort; the fake JSON-RPC just echoes the fixture)
+          # so these tests can assert on exact item order.
+          "order": "az"}]
 
-def test_fetch_channels_runtime_falls_back_to_streamdetails(monkeypatch):
+
+def test_fetch_channels_runtime_prefers_streamdetails(monkeypatch):
     from libtv import library
 
     monkeypatch.setitem(conftest.JSONRPC_RESPONSES, "VideoLibrary.GetEpisodes", EPISODES)
-    # "az" order keeps the fetch order deterministic (Kodi is the one doing
-    # the actual sort; the fake JSON-RPC just echoes the fixture) so this
-    # test can assert on exact item order.
-    defs = [{"id": "libtv.tv", "name": "TV Shows", "type": "episodes",
-             "genres": [], "studios": [], "year_from": None, "year_to": None,
-             "order": "az"}]
 
-    items = library.fetch_channels(defs, 10, 0)[0]["items"]
+    items = library.fetch_channels(_DEFS, 10, 0)[0]["items"]
 
-    assert [it["runtime"] for it in items] == [1800, 2632, 0]
+    assert [it["runtime"] for it in items] == [1750, 2632, 0]
     # The bulky streamdetails blob must not leak into the schedule.
     assert all("streamdetails" not in it for it in items)
 
@@ -49,13 +53,46 @@ def test_fetch_channels_runtime_falls_back_to_observed_cache(monkeypatch):
     from libtv import library
 
     monkeypatch.setitem(conftest.JSONRPC_RESPONSES, "VideoLibrary.GetEpisodes", EPISODES)
-    defs = [{"id": "libtv.tv", "name": "TV Shows", "type": "episodes",
-             "genres": [], "studios": [], "year_from": None, "year_to": None,
-             "order": "az"}]
 
-    items = library.fetch_channels(defs, 10, 0, runtime_cache={"/c.mkv": 2400})[0]["items"]
+    items = library.fetch_channels(_DEFS, 10, 0, runtime_cache={"/c.mkv": 2400})[0]["items"]
 
-    assert [it["runtime"] for it in items] == [1800, 2632, 2400]
+    assert [it["runtime"] for it in items] == [1750, 2632, 2400]
+
+
+def test_fetch_channels_observed_cache_beats_nominal_scraped_runtime(monkeypatch):
+    """The live-reported bug: a scraper stamps a 7-8 minute episode with the
+    show's nominal 30-minute slot and Kodi has no streamdetails for the file
+    — once the file has actually played, the observed duration must override
+    the wrong-but-truthy scraped value."""
+    from libtv import library
+
+    monkeypatch.setitem(conftest.JSONRPC_RESPONSES, "VideoLibrary.GetEpisodes", {
+        "episodes": [
+            {"title": "Short", "file": "/short.mkv", "runtime": 1800,
+             "streamdetails": {}},
+        ]
+    })
+
+    items = library.fetch_channels(_DEFS, 10, 0, runtime_cache={"/short.mkv": 480})[0]["items"]
+
+    assert [it["runtime"] for it in items] == [480]
+
+
+def test_fetch_channels_scraped_runtime_used_without_measurements(monkeypatch):
+    """With no streamdetails and no observed duration, the scraped runtime
+    is still the best available value and must be kept."""
+    from libtv import library
+
+    monkeypatch.setitem(conftest.JSONRPC_RESPONSES, "VideoLibrary.GetEpisodes", {
+        "episodes": [
+            {"title": "Scraped only", "file": "/s.mkv", "runtime": 1800,
+             "streamdetails": {}},
+        ]
+    })
+
+    items = library.fetch_channels(_DEFS, 10, 0)[0]["items"]
+
+    assert [it["runtime"] for it in items] == [1800]
 
 
 def test_fetch_channels_requests_streamdetails(monkeypatch):

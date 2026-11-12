@@ -252,5 +252,15 @@ Episodes smart playlist instead of LibTV's own genre/studio/year filters,
 evaluated by delegating to Kodi itself over JSON-RPC (`Files.GetDirectory`
 on the playlist's own path) rather than reimplementing Kodi's
 smart-playlist rule engine — a technique new to this codebase and, like the
-rest of this list, not yet live-verified. See `CLAUDE.md` for development
-constraints and known gaps.
+rest of this list, not yet live-verified. v0.12.1 lets that same flow add
+several (or all) smart playlists at once — checking more than one skips the
+per-channel name prompt and creates one channel per checked playlist, named
+after each playlist, sharing a single order pick. v0.13.0 fixes two bugs
+reported from live use: measured durations (stream details, or the duration
+observed the first time a file actually plays) now outrank scraped runtimes
+— scrapers often stamp short episodes with the show's nominal 30-minute
+slot, which drew oversized guide bars and let the guide drift out of sync
+with playback — and a programme reaching its natural end now re-tunes the
+channel so the next scheduled programme starts, instead of Kodi sometimes
+dropping back to the guide (both fixes awaiting live verification). See
+`CLAUDE.md` for development constraints and known gaps.

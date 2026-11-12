@@ -44,11 +44,11 @@ inputs for Kodi's native PVR stack and resolves streams on demand:
 | `resources/lib/libtv/schedule.py` | **Pure.** Schedule building and lookup. No Kodi imports. |
 | `resources/lib/libtv/writers.py` | **Pure.** Renders M3U and XMLTV strings from a schedule dict, and renders/parses `pvr.iptvsimple` instance-settings XML (`render_iptv_instance_settings`/`parse_iptv_instance_settings`, §7). |
 | `resources/lib/libtv/channels.py` | **Pure.** Channel-lineup configuration: `channels.json` load/save, default lineup, id allocation, reorder, JSON-RPC filter building (`build_filter`), and per-channel selection-order building (`build_sort`). |
-| `resources/lib/libtv/library.py` | Kodi JSON-RPC library queries (`VideoLibrary.GetMovies` / `GetEpisodes`, filtered and sorted per channel definition) plus genre/studio pickers for the management UI. Resolves each item's runtime, falling back to stream-details duration then an observed-playback-duration cache (§4); for `order: random` also does the day-stable selection (§4). |
+| `resources/lib/libtv/library.py` | Kodi JSON-RPC library queries (`VideoLibrary.GetMovies` / `GetEpisodes`, filtered and sorted per channel definition) plus genre/studio pickers for the management UI. Resolves each item's runtime — measured durations (stream details, then observed playback) outrank the scraped value (§4); for `order: random` also does the day-stable selection (§4). |
 | `resources/lib/libtv/generator.py` | Orchestration: fetch → schedule → write all artifacts (`regenerate`), or patch just the persisted schedule's channel metadata without a library refetch (`relabel_schedule`, §3). Owns the profile directory, the pending-seek handoff file, the version-stamped observed-runtime cache, the PVR refresh (`refresh_pvr`), and the IPTV Simple instance auto-configuration (`configure_iptv_simple`, §7). |
 | `resources/lib/libtv/plugin.py` | Plugin routing: menu, build action, the setup guide, IPTV Simple setup-paths, and auto-configure info dialogs (`show_setup_guide`, `show_iptv_setup_info`, `auto_configure_iptv_simple`, §7), and the stream resolver (`play`), including its schedule-miss loop guard (§6). |
 | `resources/lib/libtv/manage.py` | Dialog-driven channel management UI (add/rename/filter/order/reorder/delete) plus genre- and studio-based channel autotune (§3). |
-| `resources/lib/libtv/daemon.py` | Service loop (periodic regeneration, self-healing PVR-refresh retry) + `JoinInProgressPlayer` (the seek half of join-in-progress; also records observed durations). |
+| `resources/lib/libtv/daemon.py` | Service loop (periodic regeneration, self-healing PVR-refresh retry) + `JoinInProgressPlayer` (the seek half of join-in-progress; records observed durations with a settle guard; re-tunes the channel on a programme's natural EOF so Live TV continues instead of dropping to the guide — §6). |
 | `resources/lib/libtv/overlay.py` | In-playback EPG overlay (§6a): a code-only `xbmcgui.WindowDialog` listing every channel's Now/Next, read-only against `schedule.json`. |
 | `resources/lib/libtv/keymap.py` | In-playback EPG overlay (§6a): pure key validation (`valid_key`) and keymap XML rendering (`render_keymap_xml`), plus `apply_from_settings()` which writes/removes `special://profile/keymaps/libtv.xml` from the "Hotkey"/"Save hotkey now" settings. |
 | `resources/settings.xml` + `resources/language/…/strings.po` | New-format settings; labels are msgids in the 32100 range. |
@@ -149,15 +149,23 @@ deleted every channel.
   movie and tvshow results.
 - **Choosing a source**: `manage.add_channel` first asks *Filter* or *Smart
   playlist*. Filter continues into the existing type-picker/`_edit_filters`
-  flow. Smart playlist calls `manage._pick_playlist` (`dialog.select` over
-  `library.fetch_playlists()`'s results, labelled `"<name> (<Movies|TV
-  episodes>)"`) — if none exist, a notification says so rather than
-  presenting an empty picker — then asks the channel name (prefilled with
-  the playlist's own `<name>`) and order. `channel_options`'s second menu
-  item is `"Change smart playlist & order"` (re-running `_pick_playlist`,
-  preselecting the channel's current playlist) instead of `"Edit filters &
-  order"` for a `smartplaylist`-sourced channel — both still count as
-  `content_changed=True` below.
+  flow. Smart playlist calls `manage._pick_playlists` (`dialog.multiselect`
+  over `library.fetch_playlists()`'s results, labelled `"<name> (<Movies|TV
+  episodes>)"`, letting the user check one, several, or all at once) — if
+  none exist, a notification says so rather than presenting an empty
+  picker. Picking exactly one keeps the old "name your channel" prompt
+  (prefilled with the playlist's own `<name>`); picking several skips
+  per-channel naming entirely (one input dialog per playlist would defeat
+  the point of a batch add) and names each new channel after its own
+  playlist. A single order picker applies to the whole batch. Each new
+  channel gets its own `channels.next_id`, computed against the
+  already-appended channels from earlier in the same batch so ids never
+  collide within it. `channel_options`'s second menu item is `"Change smart
+  playlist & order"` (re-running `manage._pick_playlist` — the single-select
+  counterpart, since editing an existing channel still means one playlist
+  per channel — preselecting the channel's current playlist) instead of
+  `"Edit filters & order"` for a `smartplaylist`-sourced channel — both
+  still count as `content_changed=True` below.
 - **Diff-driven invalidation**: `manage._apply(definitions, content_changed)`
   is the single choke point every mutation goes through.
   `content_changed=True` (add a channel, edit filters & order, autotune —
@@ -279,17 +287,24 @@ Built in `schedule.build_schedule`, persisted as `schedule.json`.
   an episode's `runtime` from the file's stream details when stream details
   are requested, and episode scrapers often provide no runtime at all —
   without it, whole shows come back `runtime: 0` (verified live; the Kodi UI
-  still shows the correct duration, hiding the problem). `library._resolve_runtime`
-  falls back, in order: (1) `streamdetails.video[0].duration` (stripping the
-  bulky blob before scheduling either way), (2) an **observed-playback-duration
-  cache** (`generator.load_runtime_cache()` / `record_observed_runtime()`,
-  persisted as `runtime_cache.json`) — `daemon.JoinInProgressPlayer.onAVStarted`
-  records `Player().getTotalTime()` for *every* file that starts playing
+  still shows the correct duration, hiding the problem).
+  `library._resolve_runtime` picks the most trustworthy value, **measured
+  durations outranking scraped metadata**: (1) `streamdetails.video[0].duration`
+  (Kodi's own probe of the file; the bulky blob is stripped before
+  scheduling either way), (2) an **observed-playback-duration cache**
+  (`generator.load_runtime_cache()` / `record_observed_runtime()`, persisted
+  as `runtime_cache.json`) — `daemon.JoinInProgressPlayer.onAVStarted`
+  records the playing file's duration for *every* file that starts playing
   (regardless of whether a join-in-progress seek is involved), so a file
-  whose library metadata never carried a usable duration self-corrects the
-  first time it's actually played. Runtime still missing ⇒ 90 min default;
-  runtimes under 5 min are clamped up to 5 min (`DEFAULT_RUNTIME`,
-  `MIN_RUNTIME`).
+  whose library metadata is missing *or wrong* self-corrects the first time
+  it's actually played, (3) the scraped `runtime` itself. The scraped value
+  is last because TV scrapers routinely stamp episodes with the show's
+  *nominal broadcast slot* — exactly "30 minutes" — even when the actual
+  files run 7-8 minutes (user-reported live: short episodes drew 30+ minute
+  guide bars, and playback drifted ahead of the guide because slots outlived
+  their files); a wrong-but-truthy scraped runtime must never beat a real
+  measurement. Nothing available ⇒ 90 min default; runtimes under 5 min are
+  clamped up to 5 min (`DEFAULT_RUNTIME`, `MIN_RUNTIME`).
 - **Lookup**: `schedule.find_current(data, channel_id, now)` returns
   `(programme, offset_seconds)` or `None` (unknown channel / schedule doesn't
   cover `now`).
@@ -354,8 +369,9 @@ first use.
   written by the management UI rather than `regenerate()`; never touched by
   regeneration.
 - **`runtime_cache.json`** — `{"version": <addon version>, "entries": {file_path: observed_seconds}}`,
-  written by `daemon.JoinInProgressPlayer.onAVStarted` for every file that
-  starts playing; consulted by `library._resolve_runtime` (§4).
+  written by `daemon.JoinInProgressPlayer.onAVStarted` (settle-guarded, §6)
+  for every file that starts playing; consulted by `library._resolve_runtime`
+  (§4), where it outranks the scraped runtime.
   `generator.load_runtime_cache()` discards the whole cache if its stamped
   version doesn't match the running add-on's version, so an upgrade
   self-invalidates instead of needing migration code for a cache-format
@@ -396,7 +412,21 @@ The full tune sequence (the subtle part of the design — see the history in
    (an `xbmc.Player` subclass alive for the whole Kodi session) receives
    `onAVStarted`, which fires exactly when playback truly begins, and
    records the file's real duration into `runtime_cache.json` (§4)
-   regardless of whether a seek is involved.
+   regardless of whether a seek is involved. The recording is **settle-
+   guarded**: `getTotalTime()` can briefly report the *previous* item's
+   duration right after a channel change, while `getPlayingFile()` already
+   names the new file — a single immediate read could cache the old
+   (longer) duration under the new (short) file's path, and a poisoned
+   entry would outrank scraped runtimes (§4) on every regeneration until
+   overwritten. So `onAVStarted` re-reads both after a short delay
+   (`daemon.TOTAL_TIME_SETTLE_MS`); if the file changed between reads,
+   nothing is recorded (the new file's own `onAVStarted` is coming);
+   otherwise the second, settled read is what's cached. `onAVStarted` also
+   stashes the current tune — `(file, Kodi PVR channelid, LibTV channel
+   id)` — for the end-of-programme continuation below, via JSON-RPC
+   `Player.GetActivePlayers`/`Player.GetItem` (the Kodi-side channelid)
+   and the resolved item's `libtv_channel_id` property; non-channel
+   playback clears the stash.
 6. `JoinInProgressPlayer._seek_offset` gets the offset to seek to:
    - **Primary**: `Player().getPlayingItem().getProperty("libtv_seek_offset")`
      — Kodi's Player core retains the resolved item's own properties for as
@@ -431,6 +461,48 @@ specifically as a safety net until it is. See `docs/live-testing.md` §5 for
 the verification steps; once confirmed across both first tune and channel
 changes, the file-based fallback can be deleted from `plugin.py` and
 `daemon.py`.
+
+### End-of-programme continuation (EOF re-tune)
+
+Each tune resolves to a **plain finite video file** (step 4 above), so when
+that file reaches its natural end Kodi has no inherent reason to treat the
+channel as still live — left alone, its default post-playback navigation
+drops the user back to the guide/home window instead of starting the next
+scheduled programme (user-reported live, on both Linux and Windows; Kodi's
+PVR layer only *sometimes* reopens the ended stream by itself, which is why
+the drop was intermittent rather than constant). Channel *changes* never had
+this problem because they are themselves fresh plugin invocations.
+
+`daemon.JoinInProgressPlayer.onPlayBackEnded` closes the gap: on natural EOF
+of the tracked LibTV stream (stash from step 5), it re-tunes the same
+channel via JSON-RPC `Player.Open {"item": {"channelid": …}}` — Kodi
+re-invokes the M3U's `plugin://` URL and the resolver naturally lands on the
+next programme, i.e. the already-verified channel-tune path triggered by EOF
+instead of a keypress. Only `onPlayBackEnded` does this; `onPlayBackStopped`
+(user stop, channel change) and `onPlayBackError` instead *clear* the stash,
+so a deliberate stop is never re-tuned over. Guards, in order:
+
+- **Untracked playback**: no stash (ordinary library playback, or the ended
+  file isn't the tracked one) ⇒ do nothing.
+- **Rate limit**: skip if the last EOF re-tune was under
+  `daemon.RETUNE_MIN_INTERVAL` (30 s) ago — a channel that ends instantly on
+  every tune can never become a tight loop.
+- **Same-file loop guard**: read `schedule.json` (read-only — same rule as
+  the overlay, never regenerate from here) and check what `find_current`
+  says is on air now. If it is **still the file that just ended** (its slot
+  outlived the real file — wrong runtime metadata), do *not* re-tune:
+  resolving would return the same file, the seek clamp (step 7) would land
+  10 s before its end, and it would end again, forever. Accept the
+  drop-to-guide for that case and log it; correct runtimes (§4) make it
+  rare. Deliberately no delayed re-tune for when the slot expires either —
+  hijacking whatever the user navigated to minutes later is worse.
+- **Already playing again**: after a `daemon.RETUNE_GRACE_MS` wait, skip if
+  something is already playing — Kodi's own PVR reopen won the race, and a
+  second `Player.Open` would interrupt it.
+
+Any JSON-RPC error is logged and swallowed: the failure mode is the old
+behavior (drop to guide), never a crash or a loop. **Not yet
+live-verified** — see `docs/live-testing.md` §5b.
 
 ## 6a. In-playback EPG overlay
 

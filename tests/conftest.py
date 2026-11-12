@@ -48,10 +48,19 @@ def _execute_jsonrpc(request: str) -> str:
     parsed = json.loads(request)
     method = parsed["method"]
     CALLS.append(("xbmc.executeJSONRPC", method, parsed.get("params", {})))
-    return json.dumps({"jsonrpc": "2.0", "id": 1, "result": JSONRPC_RESPONSES.get(method, {})})
+    response = JSONRPC_RESPONSES.get(method, {})
+    # A configured response of {"error": ...} is returned as a JSON-RPC
+    # error (top-level "error" member), not wrapped in "result".
+    if isinstance(response, dict) and "error" in response:
+        return json.dumps({"jsonrpc": "2.0", "id": 1, "error": response["error"]})
+    return json.dumps({"jsonrpc": "2.0", "id": 1, "result": response})
 
 
 # Tests mutate this to simulate the player; seekTime lands in CALLS.
+# Optional "file_queue"/"total_queue" lists make successive
+# getPlayingFile()/getTotalTime() calls return differing values (popped
+# FIFO, falling back to the static "file"/"total" once exhausted) — used to
+# simulate getTotalTime() lagging a channel change in onAVStarted.
 PLAYER = {"playing": False, "file": "", "time": 0.0, "total": 0.0}
 
 # The ListItem last passed to xbmcplugin.setResolvedUrl(succeeded=True) —
@@ -87,7 +96,8 @@ class _Player:
 
     def getPlayingFile(self) -> str:
         self._require_playing()
-        return PLAYER["file"]
+        queue = PLAYER.get("file_queue")
+        return queue.pop(0) if queue else PLAYER["file"]
 
     def getPlayingItem(self):
         self._require_playing()
@@ -99,7 +109,8 @@ class _Player:
 
     def getTotalTime(self) -> float:
         self._require_playing()
-        return PLAYER["total"]
+        queue = PLAYER.get("total_queue")
+        return queue.pop(0) if queue else PLAYER["total"]
 
     def seekTime(self, seconds: float) -> None:
         self._require_playing()
@@ -313,6 +324,7 @@ def _reset_kodi_fakes():
                     os.remove(os.path.join(pvr_dir, fname))
                 except OSError:
                     pass
+    PLAYER.clear()
     PLAYER.update(playing=False, file="", time=0.0, total=0.0)
     global _CURRENT_LISTITEM
     _CURRENT_LISTITEM = None

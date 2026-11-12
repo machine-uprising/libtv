@@ -58,23 +58,23 @@ def json_rpc(method, params=None):
 
 
 def _resolve_runtime(item, runtime_cache=None):
-    """Fill a missing/zero runtime from stream details, then drop them.
+    """Pick the most trustworthy runtime for item, then drop streamdetails.
 
-    Requesting streamdetails normally makes Kodi return the extracted file
-    duration as `runtime` already; this explicit fallback covers versions
-    that don't, and keeps the bulky streamdetails blob out of the schedule.
-    If still missing, fall back to a duration actually observed during
-    playback (generator.record_observed_runtime) — more reliable than
-    scraped metadata for the exact file being scheduled.
+    Measured durations outrank scraped metadata: scrapers routinely stamp
+    episodes with the show's *nominal broadcast slot* (exactly "30 minutes")
+    even when the actual files run 7-8 minutes, and that wrong-but-truthy
+    value used to win unconditionally — short episodes got 30-minute guide
+    slots and playback drifted ahead of the guide. Precedence is therefore:
+    streamdetails file duration (Kodi's own probe of the file) → duration
+    observed during real playback (generator.record_observed_runtime) →
+    scraped runtime → 0 (schedule.py's 90-minute default). The bulky
+    streamdetails blob is popped so it stays out of the schedule.
     """
     details = item.pop("streamdetails", None) or {}
-    if not item.get("runtime"):
-        video = details.get("video") or [{}]
-        item["runtime"] = video[0].get("duration") or 0
-    if not item.get("runtime") and runtime_cache:
-        observed = runtime_cache.get(item.get("file"))
-        if observed:
-            item["runtime"] = observed
+    video = details.get("video") or [{}]
+    measured = video[0].get("duration") or 0
+    observed = (runtime_cache or {}).get(item.get("file")) or 0
+    item["runtime"] = measured or observed or item.get("runtime") or 0
     return item
 
 

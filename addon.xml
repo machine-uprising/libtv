@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<addon id="plugin.video.libtv" version="0.12.0" name="LibTV" provider-name="You">
+<addon id="plugin.video.libtv" version="0.13.0" name="LibTV" provider-name="You">
     <requires>
         <import addon="xbmc.python" version="3.0.1"/>
     </requires>
@@ -21,14 +21,8 @@
         <description lang="en_GB">Turn your movies and TV shows into linear channels with full TV guide support. Generates an M3U playlist and XMLTV guide for PVR IPTV Simple Client, with plugin-resolved streams so channels play whatever is currently on air.</description>
         <license>GPL-3.0-only</license>
         <platform>all</platform>
-        <news>v0.12.0: add Kodi Smart Playlists as a second channel source. When adding or editing a channel, choose "Smart playlist" to point it at an existing Movies or TV Episodes smart playlist instead of building genre/studio/year filters by hand - LibTV evaluates it by delegating to Kodi itself over JSON-RPC rather than reimplementing Kodi's smart-playlist rules, so every rule Kodi's own Smart Playlist editor supports works automatically. Not yet live-verified - see docs/live-testing.md.
+        <news>v0.13.0: fix two live-reported playback bugs. (1) Short episodes no longer draw oversized guide bars: scrapers often stamp episodes with the show's nominal slot length (e.g. exactly 30 minutes) even when the files run 7-8 minutes, and that wrong value used to win - real measured durations (the file's stream details, or the duration observed the first time an item actually plays) now take precedence over scraped metadata, which also fixes the guide drifting out of sync with actual playback. The observed-duration recording is also guarded against a stale getTotalTime() reading right after a channel change. (2) When a programme plays to its natural end, LibTV now re-tunes the channel so the next scheduled programme starts, instead of Kodi sometimes dropping back to the guide/home screen - with guards so a user pressing Stop, changing channels, or playing a normal library video is never re-tuned over. Both fixes are not yet live-verified - see docs/live-testing.md.
 
-v0.11.3: fix the settings screen's "Manage channels" button doing nothing when clicked (reported live) - it bound directly to ActivateWindow from within the modal Add-on Settings dialog, which Kodi doesn't reliably honor; it now closes the settings dialog first, then opens the channel list. Channel management settings (Manage channels, auto-generate by genre/studio, max items, shuffle) now live on their own "Channels" tab instead of being buried under "General". "Regenerate channels now" (and any channel edit that triggers a full rebuild) now shows a "Rebuilding..." notification immediately instead of leaving the button looking unresponsive until the rebuild finishes.
-
-v0.11.2: fix the EPG overlay opening on the wrong channel and changing the live channel while browsing. The overlay now opens with its cursor already on the currently-playing channel (a new libtv_channel_id ListItem property, same mechanism as the join-in-progress seek offset); navigation moved from Up/Down to Left/Right since Up/Down was confirmed to actually change the live channel via Kodi's native channel-surf, not just show a preview.
-
-v0.11.1: fix IPTV Simple auto-configuration giving no visible feedback at all when IPTV Simple was disabled (found testing live). Now shows a "Configuring..." notification immediately, and uses a blocking dialog instead of a toast for the two failures that need action from you (not installed/enabled, or something playing) so they can't go unnoticed.
-
-v0.11.0: refine IPTV Simple auto-configuration - M3U/EPG paths are now written as special:// URLs instead of resolved OS paths (confirmed pvr.iptvsimple reads local files through Kodi's VFS either way), the instance is now named after a new "Instance name" setting instead of a fixed "LibTV" string, and an existing same-named instance is now looked up by its actual content (not just a fixed id) and never silently overwritten - if one already exists with different settings, LibTV asks before changing it.</news>
+v0.12.1: adding a Smart Playlist channel now lets you check several (or all) of your smart playlists at once instead of only one at a time - checking exactly one keeps the "name your channel" prompt, checking more than one skips it and creates one channel per checked playlist, named after each playlist, sharing a single order pick for the whole batch.</news>
     </extension>
 </addon>
