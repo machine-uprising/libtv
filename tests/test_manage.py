@@ -454,7 +454,8 @@ def test_add_smartplaylist_channel_flow(monkeypatch):
         "limits": {"start": 0, "end": 1, "total": 1},
     })
     _with_playlists(monkeypatch, [_PLAYLIST_PICK])
-    conftest.DIALOG_RESPONSES["select"].extend([1, 0])  # source: Smart playlist; pick playlist 0
+    conftest.DIALOG_RESPONSES["select"].append(1)  # source: Smart playlist
+    conftest.DIALOG_RESPONSES["multiselect"].append([0])  # pick playlist 0
     conftest.DIALOG_RESPONSES["input"].append("80s Action")  # channel name (prefilled)
     # No answer queued for the order picker -> keeps the default "random".
 
@@ -474,6 +475,39 @@ def test_add_smartplaylist_channel_flow(monkeypatch):
     assert {p["title"] for p in ch["programmes"]} == {"Movie A"}
     notes = [c for c in conftest.CALLS if c[0] == "xbmcgui.notification"]
     assert ("xbmcgui.notification", "LibTV", "1 item matches this channel") in notes
+    assert _refreshed()
+
+
+def test_add_multiple_smartplaylist_channels_at_once(monkeypatch):
+    second_playlist = {
+        "path": "special://profile/playlists/video/comedies.xsp", "name": "Comedies",
+        "type": "movies",
+    }
+    monkeypatch.setitem(conftest.JSONRPC_RESPONSES, "Files.GetDirectory", {
+        "files": [{"title": "Movie A", "file": "/media/a.mkv", "runtime": 6000, "plot": "A"}],
+        "limits": {"start": 0, "end": 1, "total": 1},
+    })
+    _with_playlists(monkeypatch, [_PLAYLIST_PICK, second_playlist])
+    conftest.DIALOG_RESPONSES["select"].append(1)  # source: Smart playlist
+    conftest.DIALOG_RESPONSES["multiselect"].append([0, 1])  # pick both playlists
+    # Picking more than one skips the per-channel name prompt and the order
+    # picker keeps its default ("random") since no select answer is queued
+    # for it either.
+
+    _run_plugin(monkeypatch, "?action=channel_add")
+
+    defs = generator.load_channel_defs()
+    added = {d["playlist_name"]: d for d in defs if d.get("source") == "smartplaylist"}
+    assert set(added) == {"80s Action", "Comedies"}
+    assert added["80s Action"]["id"] != added["Comedies"]["id"]
+    for defn in added.values():
+        assert defn["source"] == "smartplaylist"
+        assert defn["order"] == "random"
+        assert defn["name"] == defn["playlist_name"]
+    assert added["Comedies"]["playlist_path"] == "special://profile/playlists/video/comedies.xsp"
+    # No "channel name" input dialog should have been shown for a batch add.
+    input_calls = [c for c in conftest.CALLS if c[0] == "xbmcgui.input"]
+    assert input_calls == []
     assert _refreshed()
 
 

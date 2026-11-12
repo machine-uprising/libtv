@@ -127,7 +127,7 @@ _PLAYLIST_TYPE_LABELS = {"movies": "Movies", "episodes": "TV episodes"}
 
 
 def _pick_playlist(dialog, current_path=None):
-    """Prompt for a Kodi Smart Playlist to source a channel from.
+    """Prompt for a single Kodi Smart Playlist to source a channel from.
 
     Returns the chosen {"path", "name", "type"} dict, or None if the user
     cancelled or no compatible (Movies/TV-episode) smart playlist exists —
@@ -140,6 +140,25 @@ def _pick_playlist(dialog, current_path=None):
     preselect = next((i for i, p in enumerate(playlists) if p["path"] == current_path), -1)
     choice = dialog.select("Smart playlist", labels, preselect=preselect)
     return playlists[choice] if choice >= 0 else None
+
+
+def _pick_playlists(dialog):
+    """Prompt for one or more Kodi Smart Playlists to each become a channel.
+
+    Returns the list of chosen {"path", "name", "type"} dicts (empty if the
+    user confirmed with nothing checked), or None if the user cancelled the
+    multiselect outright or no compatible smart playlist exists — callers
+    tell the two apart via library.fetch_playlists() being empty, same as
+    _pick_playlist.
+    """
+    playlists = library.fetch_playlists()
+    if not playlists:
+        return None
+    labels = [f"{p['name']} ({_PLAYLIST_TYPE_LABELS[p['type']]})" for p in playlists]
+    picked = dialog.multiselect("Smart playlists (select one or more)", labels)
+    if picked is None:
+        return None
+    return [playlists[i] for i in picked]
 
 
 def _preview_match_count(defn):
@@ -181,9 +200,9 @@ def add_channel(handle):
     definitions = generator.load_channel_defs()
 
     if source == 1:
-        picked = _pick_playlist(dialog)
-        if picked is None:
-            if not library.fetch_playlists():
+        picked = _pick_playlists(dialog)
+        if not picked:
+            if picked is None and not library.fetch_playlists():
                 xbmcgui.Dialog().notification(
                     "LibTV",
                     "No compatible smart playlists found — create one as a "
@@ -192,14 +211,29 @@ def add_channel(handle):
                     5000,
                 )
             return _done(handle)
-        name = dialog.input("Channel name", picked["name"])
-        if not name:
-            return _done(handle)
-        defn = _blank_channel(definitions, name, picked["type"])
-        defn["source"] = "smartplaylist"
-        defn["playlist_path"] = picked["path"]
-        defn["playlist_name"] = picked["name"]
-        defn["order"] = _ask_order(dialog, defn["order"])
+        # A single pick keeps the old "name your channel" prompt; picking
+        # several skips per-channel naming (that'd mean one input dialog per
+        # playlist, which defeats the point of adding a batch at once) and
+        # just names each channel after its own playlist.
+        if len(picked) == 1:
+            name = dialog.input("Channel name", picked[0]["name"])
+            if not name:
+                return _done(handle)
+            names = [name]
+        else:
+            names = [p["name"] for p in picked]
+        order = _ask_order(dialog, "random")
+        new_defs = []
+        for p, name in zip(picked, names):
+            defn = _blank_channel(definitions + new_defs, name, p["type"])
+            defn["source"] = "smartplaylist"
+            defn["playlist_path"] = p["path"]
+            defn["playlist_name"] = p["name"]
+            defn["order"] = order
+            new_defs.append(defn)
+        for defn in new_defs:
+            _preview_match_count(defn)
+        definitions.extend(new_defs)
     else:
         kind = dialog.select("Channel type", _KINDS)
         if kind < 0:
@@ -209,9 +243,9 @@ def add_channel(handle):
             return _done(handle)
         defn = _blank_channel(definitions, name, _KIND_TYPES[kind])
         _edit_filters(dialog, defn)
+        _preview_match_count(defn)
+        definitions.append(defn)
 
-    _preview_match_count(defn)
-    definitions.append(defn)
     _apply(definitions)
     _done(handle)
 
