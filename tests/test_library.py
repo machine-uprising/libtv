@@ -333,6 +333,96 @@ def test_fetch_channels_smartplaylist_source_az_order_sorts_serverside(monkeypat
     assert call[2]["limits"] == {"start": 0, "end": 10}
 
 
+_PLAYLIST_DEFS = [{"id": "libtv.custom.1", "name": "Shorts", "type": "episodes",
+                   "genres": [], "studios": [], "year_from": None, "year_to": None,
+                   "order": "az", "source": "smartplaylist",
+                   "playlist_path": "special://profile/playlists/video/shorts.xsp",
+                   "playlist_name": "Shorts"}]
+
+
+def test_fetch_channels_smartplaylist_tops_up_a_missing_duration(monkeypatch):
+    """Files.GetDirectory does not reliably report stream details, so an
+    episode whose scraper set no runtime comes back with no duration at all
+    — and would take a fallback slot length even though Kodi knows the
+    file's real duration. Ask the library API that does report it."""
+    from libtv import library
+
+    monkeypatch.setitem(conftest.JSONRPC_RESPONSES, "Files.GetDirectory", {
+        "files": [
+            {"title": "Short", "file": "/s01e01.mkv", "type": "episode", "id": 42},
+            {"title": "Scraped", "file": "/s01e02.mkv", "type": "episode", "id": 43,
+             "runtime": 1800},
+        ],
+    })
+    monkeypatch.setitem(conftest.JSONRPC_RESPONSES, "VideoLibrary.GetEpisodeDetails",
+                        lambda params: {"episodedetails": {
+                            "runtime": 0,
+                            "streamdetails": {"video": [{"duration": 480}]},
+                        }} if params["episodeid"] == 42 else {})
+
+    items = library.fetch_channels(_PLAYLIST_DEFS, 10, 0)[0]["items"]
+
+    assert [it["runtime"] for it in items] == [480, 1800]
+    detail_calls = [c for c in conftest.CALLS if c[1] == "VideoLibrary.GetEpisodeDetails"]
+    assert len(detail_calls) == 1, "only items with no usable duration are topped up"
+    assert detail_calls[0][2]["episodeid"] == 42
+
+
+def test_fetch_channels_smartplaylist_topup_respects_existing_precedence(monkeypatch):
+    """A top-up is a last resort: an observed playback duration (a real
+    measurement of this very file) still wins over whatever the library
+    reports."""
+    from libtv import library
+
+    monkeypatch.setitem(conftest.JSONRPC_RESPONSES, "Files.GetDirectory", {
+        "files": [{"title": "Short", "file": "/s01e01.mkv", "type": "episode", "id": 42}],
+    })
+    monkeypatch.setitem(conftest.JSONRPC_RESPONSES, "VideoLibrary.GetEpisodeDetails",
+                        {"episodedetails": {"runtime": 1800}})
+
+    items = library.fetch_channels(
+        _PLAYLIST_DEFS, 10, 0, runtime_cache={"/s01e01.mkv": 470}
+    )[0]["items"]
+
+    assert [it["runtime"] for it in items] == [470]
+    assert [c for c in conftest.CALLS if c[1] == "VideoLibrary.GetEpisodeDetails"] == []
+
+
+def test_fetch_channels_smartplaylist_topup_skipped_without_a_library_id(monkeypatch):
+    """A directory entry that isn't a library item (no type/id) can't be
+    looked up — it just takes the fallback slot length, with no round trip
+    wasted on it."""
+    from libtv import library
+
+    monkeypatch.setitem(conftest.JSONRPC_RESPONSES, "Files.GetDirectory", {
+        "files": [{"title": "Loose file", "file": "/stray.mkv"}],
+    })
+
+    items = library.fetch_channels(_PLAYLIST_DEFS, 10, 0)[0]["items"]
+
+    assert [it["runtime"] for it in items] == [0]
+    assert [c for c in conftest.CALLS if c[1].endswith("Details")] == []
+
+
+def test_fetch_channels_smartplaylist_topup_is_capped(monkeypatch):
+    """One round trip per duration-less item, so a playlist full of them
+    must not turn a rebuild into thousands of queries."""
+    from libtv import library
+
+    monkeypatch.setattr(library, "MAX_RUNTIME_TOPUPS", 2)
+    monkeypatch.setitem(conftest.JSONRPC_RESPONSES, "Files.GetDirectory", {
+        "files": [{"title": f"E{i}", "file": f"/{i}.mkv", "type": "episode", "id": i}
+                  for i in range(5)],
+    })
+    monkeypatch.setitem(conftest.JSONRPC_RESPONSES, "VideoLibrary.GetEpisodeDetails",
+                        {"episodedetails": {"runtime": 480}})
+
+    items = library.fetch_channels(_PLAYLIST_DEFS, 10, 0)[0]["items"]
+
+    assert [it["runtime"] for it in items] == [480, 480, 0, 0, 0]
+    assert len([c for c in conftest.CALLS if c[1] == "VideoLibrary.GetEpisodeDetails"]) == 2
+
+
 def test_count_matches_smartplaylist_source(monkeypatch):
     from libtv import library
 

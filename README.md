@@ -262,5 +262,22 @@ observed the first time a file actually plays) now outrank scraped runtimes
 slot, which drew oversized guide bars and let the guide drift out of sync
 with playback — and a programme reaching its natural end now re-tunes the
 channel so the next scheduled programme starts, instead of Kodi sometimes
-dropping back to the guide (both fixes awaiting live verification). See
-`CLAUDE.md` for development constraints and known gaps.
+dropping back to the guide. Testing v0.13.0 live showed both symptoms
+persisting on a smart-playlist channel, for different reasons, which
+v0.14.0 addresses: smart playlists are evaluated through a Kodi call that
+reports an item's runtime but not its stream details, so episodes whose
+scraper set no runtime had no duration from any source; the
+observed-playback durations that should have filled that gap were being
+discarded on every add-on upgrade, stored under a name the generator could
+not look up, and only consulted at the next six-hourly rebuild; and the
+end-of-programme re-tune deliberately gave up in exactly the situation a
+wrong duration produces. LibTV now asks Kodi directly for a duration it is
+missing, measures a programme watched start to finish rather than trusting
+what the player reports about a live stream, keeps measured durations
+across upgrades, rebuilds the guide
+within half a minute of learning that a real duration contradicts it,
+continues to the *next* programme when one ends early, and never resolves
+a stream into the last seconds of a file. It also logs, per channel and
+per tune, exactly where each slot length came from. Awaiting live
+verification — see `docs/live-testing.md` §5c and `CLAUDE.md` for
+development constraints and known gaps.

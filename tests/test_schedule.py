@@ -49,6 +49,43 @@ def test_build_schedule_runtime_fallbacks():
     assert second["stop"] - second["start"] == schedule.MIN_RUNTIME
 
 
+def test_build_schedule_fallback_follows_the_channel_not_the_90_minute_default():
+    """A channel of 8-minute shorts must not give an item with no duration
+    metadata a 90-minute slot — that both lies in the guide and leaves the
+    channel sitting on a dead slot long after the file ends."""
+    channels = [{
+        "id": "c", "name": "C", "items": [
+            {"title": "Short A", "file": "/a.mkv", "runtime": 480},
+            {"title": "Short B", "file": "/b.mkv", "runtime": 500},
+            {"title": "Unknown", "file": "/c.mkv"},
+        ],
+    }]
+    data = schedule.build_schedule(channels, ANCHOR, ANCHOR + 1500)
+    progs = data["channels"][0]["programmes"]
+
+    assert progs[2]["stop"] - progs[2]["start"] == 490
+
+
+def test_build_schedule_falls_back_to_the_default_when_the_channel_knows_nothing():
+    channels = [{"id": "c", "name": "C", "items": [{"title": "Unknown", "file": "/c.mkv"}]}]
+
+    data = schedule.build_schedule(channels, ANCHOR, ANCHOR + 1)
+    prog = data["channels"][0]["programmes"][0]
+
+    assert prog["stop"] - prog["start"] == schedule.DEFAULT_RUNTIME
+
+
+def test_next_after_returns_the_following_programme():
+    channels = [{"id": "c", "name": "C", "items": ITEMS}]
+    data = schedule.build_schedule(channels, ANCHOR, ANCHOR + 12 * 3600)
+    progs = data["channels"][0]["programmes"]
+
+    assert schedule.next_after(data, "c", progs[0]) == progs[1]
+    assert schedule.next_after(data, "c", progs[-1]) is None
+    assert schedule.next_after(data, "nope", progs[0]) is None
+    assert schedule.next_after(data, "c", dict(progs[0], start=progs[0]["start"] + 1)) is None
+
+
 def test_build_schedule_carries_through_enrichment_fields():
     channels = [{
         "id": "c", "name": "C", "items": [

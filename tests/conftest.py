@@ -49,6 +49,11 @@ def _execute_jsonrpc(request: str) -> str:
     method = parsed["method"]
     CALLS.append(("xbmc.executeJSONRPC", method, parsed.get("params", {})))
     response = JSONRPC_RESPONSES.get(method, {})
+    # A configured response may be a callable taking the request params, for
+    # methods whose result depends on them (per-item VideoLibrary.Get*Details
+    # lookups, say) rather than being fixed per method.
+    if callable(response):
+        response = response(parsed.get("params", {}))
     # A configured response of {"error": ...} is returned as a JSON-RPC
     # error (top-level "error" member), not wrapped in "result".
     if isinstance(response, dict) and "error" in response:

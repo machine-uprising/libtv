@@ -27,6 +27,11 @@ from libtv import generator, keymap, schedule
 _SCHEDULE_MISS_REGEN_PROPERTY = "libtv_last_schedule_miss_regen"
 _SCHEDULE_MISS_REGEN_GUARD_SECONDS = 5
 
+# Joining a programme this close to the end of its real file is pointless —
+# playback would end seconds later and bounce straight back out of Live TV.
+# Matches daemon.py's seek clamp, which parks exactly here.
+_DEAD_TAIL_SECONDS = 10
+
 
 def main_menu(base_url, handle):
     for label, action, is_folder in [
@@ -193,6 +198,86 @@ def auto_configure_iptv_simple():
         dialog.notification("LibTV", message, xbmcgui.NOTIFICATION_INFO, 5000)
 
 
+def _channel_name(data, channel_id):
+    """The channel's display name — what the PVR client shows for it, and
+    therefore how daemon.py can find its Kodi channel id by label."""
+    for ch in (data or {}).get("channels", []):
+        if ch["id"] == channel_id:
+            return ch.get("name", "")
+    return ""
+
+
+def _finished_programme(channel_id):
+    """The programme the service reports as just played to its end on this
+    channel, or None.
+
+    Written by daemon.onPlayBackEnded before it re-tunes. The schedule alone
+    can't answer "what comes next" at that moment: when a slot outlived its
+    real file — the usual reason a programme ends early — the schedule still
+    shows the finished programme on air, and resolving that again would seek
+    straight back into the seconds before the end it just reached.
+    """
+    advance = generator.read_pending_advance()
+    if not advance or advance.get("channel_id") != channel_id:
+        return None
+    generator.clear_pending_advance()
+    return advance
+
+
+def _in_dead_tail(prog, offset):
+    """True if joining at `offset` would land in the last seconds of the
+    programme's real file — i.e. the schedule's slot is longer than the
+    content it was built for (a scraped runtime that overstates the file,
+    or a fallback slot length for an item with no duration metadata). The
+    real duration comes from the observed-playback cache, so this only
+    fires for files that have actually played at least once."""
+    real = generator.load_runtime_cache().get(prog.get("file")) or 0
+    return bool(real) and offset > max(real - _DEAD_TAIL_SECONDS, 0)
+
+
+def _skip_outlived_slot(data, channel_id, prog, offset):
+    """(programme, offset) to actually resolve for this channel.
+
+    Normally just what the schedule says is on now. Two cases move past it,
+    both meaning the slot has outlived the file it was built for: the
+    service reported the programme as finished (continue after *that* one,
+    which may be ahead of what the schedule thinks is on air), or joining
+    at `offset` would land in the dead tail of the current one.
+
+    Playback only ever moves forward — an advance that would resolve
+    something scheduled *earlier* than what is on air now is ignored, so a
+    stale request can't drag a channel backwards. The schedule itself is
+    left alone here; the service's own stale-schedule rebuild is what brings
+    the guide back in line.
+    """
+    finished = _finished_programme(channel_id)
+    if finished is not None:
+        reason, after = "continuing after the programme that just ended", finished
+    elif _in_dead_tail(prog, offset):
+        reason, after = "slot outlived its file", prog
+    else:
+        return prog, offset
+
+    nxt = schedule.next_after(data, channel_id, after)
+    if nxt is None:
+        xbmc.log(
+            f"LibTV: {channel_id}: {reason}, but nothing is scheduled after it",
+            xbmc.LOGWARNING,
+        )
+        return prog, offset
+    if (nxt["start"], nxt.get("file")) == (prog["start"], prog.get("file")):
+        # The schedule already moved on to it by itself; join it where the
+        # guide says it is rather than restarting it.
+        return prog, offset
+    if nxt["start"] < prog["start"]:
+        return prog, offset
+    xbmc.log(
+        f"LibTV: {channel_id}: {reason} — playing {nxt.get('title', '')!r} instead",
+        xbmc.LOGINFO,
+    )
+    return nxt, 0
+
+
 def play(handle, channel_id):
     now = time.time()
     data = generator.load_schedule()
@@ -220,7 +305,7 @@ def play(handle, channel_id):
         xbmcplugin.setResolvedUrl(handle, False, xbmcgui.ListItem())
         return
 
-    prog, offset = found
+    prog, offset = _skip_outlived_slot(data, channel_id, *found)
     li = xbmcgui.ListItem(path=prog["file"])
     # Lets overlay.show() find which channel is currently playing (so the
     # EPG overlay can open with its cursor already on it) via the same
@@ -238,9 +323,17 @@ def play(handle, channel_id):
     # The pending-seek file is still written as a fallback until this is
     # live-verified across PVR channel changes (see docs/live-testing.md);
     # drop it once confirmed.
-    if xbmcaddon.Addon().getSettingBool("join_in_progress") and offset > 5:
-        li.setProperty("libtv_seek_offset", str(int(offset)))
-        generator.write_pending_seek(prog["file"], offset)
+    seek = int(offset) if xbmcaddon.Addon().getSettingBool("join_in_progress") and offset > 5 else 0
+    if seek:
+        li.setProperty("libtv_seek_offset", str(seek))
+        generator.write_pending_seek(prog["file"], seek)
+    # Hand the whole tune over to the service: which library file this
+    # channel really resolved to (the key its observed-runtime cache must
+    # use), the slot it was scheduled into (so a file whose real duration
+    # contradicts the guide can be spotted) and the channel to re-tune when
+    # the programme ends. Written before resolving, so it is already on disk
+    # by the time playback starts.
+    generator.write_current_tune(channel_id, _channel_name(data, channel_id), prog, seek)
     xbmcplugin.setResolvedUrl(handle, True, li)
 
 

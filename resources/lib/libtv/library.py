@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 import xml.etree.ElementTree as ET
+from collections import Counter
 
 import xbmc
 import xbmcvfs
@@ -47,6 +48,24 @@ _MEDIA = {
     "mixed": ("movies", "episodes"),
 }
 
+# Per-item detail queries, keyed by the `type` a Files.GetDirectory result
+# carries — see _top_up_runtime.
+_DETAIL_QUERIES = {
+    "episode": ("VideoLibrary.GetEpisodeDetails", "episodeid", "episodedetails"),
+    "movie": ("VideoLibrary.GetMovieDetails", "movieid", "moviedetails"),
+}
+
+# Most per-item duration top-ups to issue for one channel in one rebuild.
+# Each is its own JSON-RPC round trip, so a playlist full of items with no
+# duration metadata must not be able to turn a rebuild into thousands of
+# queries — the ones past the cap just take the fallback slot length.
+MAX_RUNTIME_TOPUPS = 100
+
+# Order the per-channel runtime-source summary is logged in (most to least
+# trustworthy), so a glance at kodi.log says where every slot length came
+# from — a "wall of 90-minute bars" report is answered by `default: N`.
+_RUNTIME_SOURCES = ("streamdetails", "observed", "topped-up", "scraped", "default")
+
 
 def json_rpc(method, params=None):
     request = {"jsonrpc": "2.0", "method": method, "id": 1, "params": params or {}}
@@ -60,6 +79,9 @@ def json_rpc(method, params=None):
 def _resolve_runtime(item, runtime_cache=None):
     """Pick the most trustworthy runtime for item, then drop streamdetails.
 
+    Returns (item, source) where source names which input won — the caller
+    aggregates those into the per-channel summary logged by fetch_channels.
+
     Measured durations outrank scraped metadata: scrapers routinely stamp
     episodes with the show's *nominal broadcast slot* (exactly "30 minutes")
     even when the actual files run 7-8 minutes, and that wrong-but-truthy
@@ -67,15 +89,49 @@ def _resolve_runtime(item, runtime_cache=None):
     slots and playback drifted ahead of the guide. Precedence is therefore:
     streamdetails file duration (Kodi's own probe of the file) → duration
     observed during real playback (generator.record_observed_runtime) →
-    scraped runtime → 0 (schedule.py's 90-minute default). The bulky
-    streamdetails blob is popped so it stays out of the schedule.
+    scraped runtime → 0 (a fallback slot length, schedule.fallback_runtime).
+    The bulky streamdetails blob is popped so it stays out of the schedule.
     """
     details = item.pop("streamdetails", None) or {}
     video = details.get("video") or [{}]
     measured = video[0].get("duration") or 0
     observed = (runtime_cache or {}).get(item.get("file")) or 0
-    item["runtime"] = measured or observed or item.get("runtime") or 0
-    return item
+    scraped = item.get("runtime") or 0
+    item["runtime"] = measured or observed or scraped or 0
+    if measured:
+        return item, "streamdetails"
+    if observed:
+        return item, "observed"
+    if scraped:
+        return item, "scraped"
+    return item, "default"
+
+
+def _can_top_up(item):
+    return item.get("type") in _DETAIL_QUERIES and item.get("id") is not None
+
+
+def _top_up_runtime(item, runtime_cache):
+    """Second-chance duration lookup for an item a directory listing
+    returned no usable duration for. Returns (item, source).
+
+    Smart-playlist channels evaluate their .xsp through Files.GetDirectory,
+    which does not reliably fill `streamdetails` the way VideoLibrary.Get*
+    does — so an item whose scraper never set a `runtime` comes back with no
+    duration at all and would take the fallback slot length, even though
+    Kodi knows the file's real duration perfectly well. Directory results
+    carry the library `type`/`id`, so ask the library API that does report
+    stream details for just that one item.
+    """
+    method, id_key, result_key = _DETAIL_QUERIES[item["type"]]
+    params = {id_key: item["id"], "properties": ["runtime", "streamdetails"]}
+    details = json_rpc(method, params).get(result_key) or {}
+    if not details:
+        return item, "default"
+    item["runtime"] = details.get("runtime") or 0
+    item["streamdetails"] = details.get("streamdetails")
+    item, source = _resolve_runtime(item, runtime_cache)
+    return item, ("default" if source == "default" else "topped-up")
 
 
 def _select(defn, items, sort, max_items, anchor_epoch):
@@ -95,7 +151,7 @@ def _select(defn, items, sort, max_items, anchor_epoch):
     return schedule.shuffled(defn["id"], items, anchor_epoch)[:max_items]
 
 
-def _fetch_filter_items(defn, max_items, runtime_cache, sort):
+def _fetch_filter_items(defn, max_items, runtime_cache, sort, counts):
     filt = channels.build_filter(defn)
     items = []
     for kind in _MEDIA[defn["type"]]:
@@ -106,8 +162,35 @@ def _fetch_filter_items(defn, max_items, runtime_cache, sort):
         if sort:
             params["sort"] = sort
             params["limits"] = {"start": 0, "end": max_items}
-        fetched = json_rpc(method, params).get(key, [])
-        items.extend(_resolve_runtime(item, runtime_cache) for item in fetched)
+        for fetched in json_rpc(method, params).get(key, []):
+            # No top-up pass here: these queries already request
+            # streamdetails, so there is no second source to consult.
+            item, source = _resolve_runtime(fetched, runtime_cache)
+            counts[source] += 1
+            items.append(item)
+    return items
+
+
+def _fetch_playlist_channel_items(defn, max_items, runtime_cache, sort, counts):
+    limits = {"start": 0, "end": max_items} if sort else None
+    items = []
+    topups = 0
+    capped = False
+    for fetched in fetch_playlist_items(defn["playlist_path"], sort, limits):
+        item, source = _resolve_runtime(fetched, runtime_cache)
+        if source == "default" and _can_top_up(item):
+            if topups < MAX_RUNTIME_TOPUPS:
+                topups += 1
+                item, source = _top_up_runtime(item, runtime_cache)
+            elif not capped:
+                capped = True
+                xbmc.log(
+                    f"LibTV: channel {defn['id']}: more than {MAX_RUNTIME_TOPUPS} items "
+                    "without duration metadata, remaining ones keep the fallback slot length",
+                    xbmc.LOGWARNING,
+                )
+        counts[source] += 1
+        items.append(item)
     return items
 
 
@@ -122,17 +205,27 @@ def fetch_channels(definitions, max_items, anchor_epoch, runtime_cache=None):
     evaluates an existing Kodi Smart Playlist via fetch_playlist_items.
     Either way, `_select` applies the channel's `order` and the max_items cap
     the same way.
+
+    Each channel logs where its slot lengths came from (see
+    _RUNTIME_SOURCES) — that line is the first thing to read when a channel
+    draws implausible guide bars.
     """
     out = []
     for defn in definitions:
         sort = channels.build_sort(defn)
+        counts = Counter()
         if defn.get("source") == "smartplaylist":
-            limits = {"start": 0, "end": max_items} if sort else None
-            fetched = fetch_playlist_items(defn["playlist_path"], sort, limits)
-            items = [_resolve_runtime(item, runtime_cache) for item in fetched]
+            items = _fetch_playlist_channel_items(defn, max_items, runtime_cache, sort, counts)
         else:
-            items = _fetch_filter_items(defn, max_items, runtime_cache, sort)
+            items = _fetch_filter_items(defn, max_items, runtime_cache, sort, counts)
+        fetched_total = len(items)
         items = _select(defn, items, sort, max_items, anchor_epoch)
+        summary = ", ".join(f"{name}: {counts[name]}" for name in _RUNTIME_SOURCES)
+        xbmc.log(
+            f"LibTV: channel {defn['id']}: {len(items)} of {fetched_total} items "
+            f"(runtime from — {summary})",
+            xbmc.LOGINFO,
+        )
         out.append({
             "id": defn["id"],
             "name": defn["name"],

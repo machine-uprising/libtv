@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<addon id="plugin.video.libtv" version="0.13.0" name="LibTV" provider-name="You">
+<addon id="plugin.video.libtv" version="0.14.0" name="LibTV" provider-name="You">
     <requires>
         <import addon="xbmc.python" version="3.0.1"/>
     </requires>
@@ -21,8 +21,6 @@
         <description lang="en_GB">Turn your movies and TV shows into linear channels with full TV guide support. Generates an M3U playlist and XMLTV guide for PVR IPTV Simple Client, with plugin-resolved streams so channels play whatever is currently on air.</description>
         <license>GPL-3.0-only</license>
         <platform>all</platform>
-        <news>v0.13.0: fix two live-reported playback bugs. (1) Short episodes no longer draw oversized guide bars: scrapers often stamp episodes with the show's nominal slot length (e.g. exactly 30 minutes) even when the files run 7-8 minutes, and that wrong value used to win - real measured durations (the file's stream details, or the duration observed the first time an item actually plays) now take precedence over scraped metadata, which also fixes the guide drifting out of sync with actual playback. The observed-duration recording is also guarded against a stale getTotalTime() reading right after a channel change. (2) When a programme plays to its natural end, LibTV now re-tunes the channel so the next scheduled programme starts, instead of Kodi sometimes dropping back to the guide/home screen - with guards so a user pressing Stop, changing channels, or playing a normal library video is never re-tuned over. Both fixes are not yet live-verified - see docs/live-testing.md.
-
-v0.12.1: adding a Smart Playlist channel now lets you check several (or all) of your smart playlists at once instead of only one at a time - checking exactly one keeps the "name your channel" prompt, checking more than one skips it and creates one channel per checked playlist, named after each playlist, sharing a single order pick for the whole batch.</news>
+        <news>v0.14.0: short episodes could still get wrong guide bars, and still drop back to the guide when they ended - live testing found different causes behind the same symptoms. Smart-playlist channels are evaluated through a Kodi call that reports an item's runtime but not its stream details, so episodes whose scraper set no runtime had no duration at all; LibTV now asks Kodi directly for a duration it's missing. Durations measured during playback are no longer discarded whenever the add-on is upgraded, are stored under a name the guide builder can actually look up, and no longer wait up to six hours to be used - learning that a file contradicts the guide now rebuilds it within half a minute. A programme watched from start to finish now measures its own duration, rather than trusting what the player reports about a live stream. An item with no duration anywhere takes a slot length based on the rest of its channel instead of a flat 90 minutes. When a programme ends early, playback continues with the next one instead of giving up, and re-selecting a channel late in an over-long slot starts the next programme rather than the last few seconds of the previous one. Each rebuild and each tune now logs where its durations came from.</news>
     </extension>
 </addon>

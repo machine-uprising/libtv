@@ -33,9 +33,30 @@ def shuffled(channel_id, items, anchor_epoch):
     return items
 
 
-def _programme(item, start):
+def fallback_runtime(items):
+    """Slot length to use for items with no runtime metadata at all.
+
+    The median of whatever runtimes the channel *does* know beats a flat
+    90 minutes: a channel of 8-minute shorts would otherwise give every
+    metadata-less item a 90-minute slot, which both lies in the guide and
+    leaves playback sitting on a long dead slot after the file ends.
+    DEFAULT_RUNTIME only applies when the channel knows nothing at all.
+    Runtimes below MIN_RUNTIME are ignored here: they are the garbage
+    values MIN_RUNTIME exists to floor, and must not drag a whole channel's
+    fallback down with them.
+    """
+    known = sorted(int(i["runtime"]) for i in items if (i.get("runtime") or 0) >= MIN_RUNTIME)
+    if not known:
+        return DEFAULT_RUNTIME
+    mid = len(known) // 2
+    if len(known) % 2:
+        return known[mid]
+    return (known[mid - 1] + known[mid]) // 2
+
+
+def _programme(item, start, fallback=DEFAULT_RUNTIME):
     runtime = item.get("runtime") or 0
-    duration = max(MIN_RUNTIME, int(runtime) or DEFAULT_RUNTIME)
+    duration = max(MIN_RUNTIME, int(runtime) or fallback)
     prog = {
         "start": start,
         "stop": start + duration,
@@ -81,10 +102,11 @@ def build_schedule(channels, anchor_epoch, until_epoch):
     for ch in channels:
         programmes = []
         items = ch.get("items") or []
+        fallback = fallback_runtime(items)
         cursor = anchor_epoch
         index = 0
         while items and cursor < until_epoch:
-            prog = _programme(items[index % len(items)], cursor)
+            prog = _programme(items[index % len(items)], cursor, fallback)
             programmes.append(prog)
             cursor = prog["stop"]
             index += 1
@@ -110,6 +132,26 @@ def find_current(schedule_data, channel_id, now_epoch):
         for prog in ch["programmes"]:
             if prog["start"] <= now_epoch < prog["stop"]:
                 return prog, now_epoch - prog["start"]
+        return None
+    return None
+
+
+def next_after(schedule_data, channel_id, programme):
+    """The programme scheduled immediately after `programme`, or None.
+
+    Identity is (start, file) — the pair that is unique within a channel's
+    programme list and survives a round trip through schedule.json. Used
+    when a slot has outlived its real file and playback must move on
+    without waiting for the slot's nominal end (plugin.play's advance
+    marker and dead-tail guard, see docs/architecture.md §6).
+    """
+    for ch in schedule_data.get("channels", []):
+        if ch["id"] != channel_id:
+            continue
+        programmes = ch["programmes"]
+        for i, prog in enumerate(programmes):
+            if prog["start"] == programme["start"] and prog.get("file") == programme.get("file"):
+                return programmes[i + 1] if i + 1 < len(programmes) else None
         return None
     return None
 

@@ -311,7 +311,10 @@ file itself unevaluated, an empty result, or an error.
     it directly (`VideoLibrary.GetEpisodeDetails` with
     `["runtime", "streamdetails"]`) — no streamdetails and a round scraped
     runtime means the fix can only kick in after the file has played once
-    (observed cache), which is the expected behavior, not a regression.
+    (observed cache). On a **smart-playlist** channel no streamdetails is
+    expected — `Files.GetDirectory` doesn't report them — and the per-item
+    top-up (§5c) is what should be filling the gap; the per-channel
+    `runtime from —` log line says whether it did.
 - **Schedule stability within a day** — press **Regenerate now**, then confirm
   what was on air a minute ago did not retroactively change (channels anchor at
   midnight UTC with a `channel_id:anchor` seed).
@@ -344,10 +347,10 @@ file itself unevaluated, an empty result, or an error.
   file's real length — the observed cache outranks the scraped runtime, so
   this works even when the library's value is wrong rather than missing.
   Check `runtime_cache.json` in the profile dir for a `{file: seconds}`
-  entry — the log line to watch for the underlying mechanism is
-  `LibTV: joining programme in progress...` (confirms `onAVStarted` fired;
-  duration recording happens on the same event, silently — there's no
-  dedicated log line for it currently).
+  entry — the per-tune log line (§5c) shows both the measured duration and
+  the path it is recorded under. The rebuild no longer has to be triggered
+  by hand either: a measured duration that contradicts the schedule
+  triggers one within ~30 s (§5c).
   - **The recording is settle-guarded** (`daemon.TOTAL_TIME_SETTLE_MS`):
     `getTotalTime()` can lag a channel change and report the previous
     item's duration under the new file's name. After rapid channel zapping
@@ -683,18 +686,83 @@ platforms:
 - **Ordinary library playback is untouched** — play a movie directly from
   the library (not via a channel) to its end: no re-tune, normal Kodi
   post-playback behavior.
-- **Slot-outlives-file is handled without looping** — if an item with a
-  too-long scheduled slot ends early (most likely before the runtime fixes
-  have self-corrected the library), the log should show
-  `LibTV: not re-tuning <id> — schedule still shows the programme that just
-  finished` and Kodi drops to the guide once — it must NOT re-tune into a
-  loop of 10-second tail replays. (`LibTV: skipping EOF re-tune (rate
-  limit)` appearing repeatedly would indicate such a loop was attempted and
-  caught — investigate, don't ship.)
+- **Slot-outlives-file keeps playing, without looping** — when an item with
+  a too-long scheduled slot ends early (the usual case until durations have
+  self-corrected), the service writes `pending_advance.json` naming the
+  programme that finished and the resolver continues *after* it:
+  `LibTV: <id>: continuing after the programme that just ended — playing
+  '<title>' instead`. Watch two or three boundaries in a row: each should
+  move to a **different** programme, never replay the one that just
+  finished and never serve a few seconds of tail. (`LibTV: skipping EOF
+  re-tune (rate limit)` appearing repeatedly would indicate a loop was
+  attempted and caught — investigate, don't ship.)
 - **Re-tune failure is graceful** — if `Player.Open` ever fails (log:
   `LibTV: EOF re-tune failed: …`), behavior must degrade to the old
   drop-to-guide, never a crash of the service loop (the next regen tick
   should still fire on schedule).
+
+## 5c. Durations and self-healing (v0.14.0) — NOT yet live-verified
+
+Background: a live report of 7-8 minute episodes drawing 90-minute guide
+bars on a **smart-playlist** channel (v0.13.0's 30-minute-bar fix had
+already shipped) traced to items with no duration from any source, plus
+three reasons the observed-runtime cache could never rescue them. See
+`docs/architecture.md` §4/§6/§7. Verify on the affected box first.
+
+- **The per-channel runtime summary explains every channel** — after a
+  rebuild, each channel logs one line:
+  `LibTV: channel <id>: <n> of <m> items (runtime from — streamdetails: a,
+  observed: b, topped-up: c, scraped: d, default: e)`. For the channel that
+  was drawing 90-minute bars, `topped-up` should now be non-zero and
+  `default` should be 0 (or near it). This line is the first thing to read
+  for *any* future "the guide bars look wrong" report — it says where each
+  slot length came from, so there is nothing left to guess at.
+- **The short show's bars match its files** — check the EPG for the show
+  that was wrong: ~8-minute bars, not 90. If `default` is still non-zero
+  for that channel, the items genuinely have no duration anywhere in Kodi's
+  database and must be played once (next item).
+- **Durations self-correct within the same sitting** — play an item that is
+  still scheduled at a fallback length. Within ~30 s of playback starting
+  the log should show
+  `LibTV: <file> runs <n>s but was scheduled a <m>s slot — flagging the
+  schedule for a rebuild`, then
+  `LibTV: rebuilding — a measured duration contradicted the schedule`.
+  The **EPG display** only catches up once playback stops (the IPTV Simple
+  reload is still skipped during playback by design — look for
+  `LibTV: toggled IPTV Simple to reload channels and guide` within 30 s of
+  stopping). Repeated rebuilds during one sitting should not happen: they
+  are spaced by `daemon.STALE_REGEN_MIN_INTERVAL` (5 min).
+- **Re-tuning late in an over-long slot doesn't serve a dead tail** —
+  before the schedule has corrected itself, select the channel again a few
+  minutes after a short programme would have ended. It must start the
+  *next* programme (`LibTV: <id>: slot outlived its file — playing '<title>'
+  instead`), not the final seconds of the previous one. This was the
+  user-reported "re-selecting it starts where the last attempt started".
+- **The cache survives the upgrade** — after installing over the previous
+  version, `runtime_cache.json` in the profile dir must still contain its
+  `entries` (the old behavior deliberately wiped them on any version
+  change; this replaces the former "Runtime cache self-invalidates on
+  upgrade" check). Its keys must be **library file paths**
+  (`/media/...`/`smb://...`), not `pvr://` URLs — a `pvr://` key means the
+  tune record isn't reaching the service and nothing can look those entries
+  up again.
+- **A programme watched start to finish measures its own duration** — let
+  one play from its beginning to its natural end without pausing or
+  seeking. At EOF the log should show
+  `LibTV: <file> played for <n>s in a <m>s slot — flagging the schedule for
+  a rebuild` when the slot was wrong, and `runtime_cache.json` should hold
+  that measured value. This is the backstop for `getTotalTime()` reporting
+  the channel's EPG entry rather than the file — if the cache entry matches
+  the *slot* length rather than the real file length, that is exactly what
+  happened, and the elapsed measurement is what corrects it.
+- **The per-tune diagnostic line** — every tune logs:
+  `LibTV: tune channel=<id> file=<library path> playing_file=<what Kodi
+  reports> slot=<n>s measured=<n>s offset=<n>s properties=<yes|no>`.
+  Capture one. It answers three long-standing open questions at once:
+  whether `getPlayingFile()` matches the library path for a PVR stream,
+  whether the resolved ListItem's properties survive into PVR playback
+  (`properties=yes` ⇒ `pending_seek.json` can finally be deleted, see §5),
+  and whether the slot the guide shows matches the file actually playing.
 
 ## 6. Sanity-check the library over JSON-RPC
 

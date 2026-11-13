@@ -282,7 +282,11 @@ def test_runtime_cache_round_trips(monkeypatch):
     assert generator.load_runtime_cache() == {"/media/a.mkv": 5432, "/media/b.mkv": 1800}
 
 
-def test_runtime_cache_self_invalidates_on_version_mismatch(monkeypatch):
+def test_runtime_cache_survives_an_addon_upgrade(monkeypatch):
+    """Measured durations are observations of the user's own files, and for
+    items whose library metadata has no duration at all they are the only
+    thing standing between them and a default-length slot — an upgrade must
+    not throw them away."""
     from libtv import generator
 
     generator.record_observed_runtime("/media/a.mkv", 5432)
@@ -296,8 +300,18 @@ def test_runtime_cache_self_invalidates_on_version_mismatch(monkeypatch):
     with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f)
 
-    assert generator.load_runtime_cache() == {}, \
-        "an add-on upgrade must discard a cache written by a different version"
+    assert generator.load_runtime_cache() == {"/media/a.mkv": 5432}
+
+
+def test_runtime_cache_rejects_a_malformed_file(monkeypatch):
+    """The version stamp no longer gates the cache, so the on-disk shape is
+    what has to be validated instead."""
+    from libtv import generator
+
+    for payload in ('["not", "a", "mapping"]', '{"entries": {"/a.mkv": "two hours"}}'):
+        with open(generator._runtime_cache_path(), "w", encoding="utf-8") as f:
+            f.write(payload)
+        assert generator.load_runtime_cache() == {}
 
 
 def test_runtime_cache_ignores_zero_or_missing_duration(monkeypatch):
@@ -348,6 +362,121 @@ def test_resolver_plays_current_programme_and_hands_off_seek(monkeypatch):
     pending = generator.read_pending_seek()
     assert pending["file"] == "/media/a.mkv"
     assert pending["offset"] == offset
+
+
+def test_resolver_records_the_tune_for_the_service(monkeypatch):
+    """The service needs more than the seek offset: the library path the
+    stream resolved to (the key its observed-runtime cache must use), the
+    slot it was scheduled into, and the channel to re-tune at EOF."""
+    from libtv import generator
+
+    _with_library(monkeypatch)
+    data = generator.regenerate()
+    offset = _freeze_mid_programme(monkeypatch, data, seconds_in=1800)
+    prog = data["channels"][0]["programmes"][0]
+
+    _run_plugin(monkeypatch, "?action=play&channel=libtv.movies")
+
+    tune = generator.read_current_tune()
+    assert tune["channel_id"] == "libtv.movies"
+    assert tune["channel_name"] == data["channels"][0]["name"]
+    assert tune["file"] == "/media/a.mkv"
+    assert (tune["start"], tune["stop"]) == (prog["start"], prog["stop"])
+    assert tune["offset"] == offset
+
+
+def test_resolver_honours_an_advance_request_from_the_service(monkeypatch):
+    """After a programme plays to its end inside a slot that outlived it,
+    the service asks for the next programme — otherwise this resolve would
+    return the same file and seek straight back into the end it just
+    reached."""
+    from libtv import generator
+
+    _with_library(monkeypatch)
+    data = generator.regenerate()
+    _freeze_mid_programme(monkeypatch, data, seconds_in=1800)
+    progs = data["channels"][0]["programmes"]
+    generator.write_pending_advance("libtv.movies", progs[0]["file"], progs[0]["start"])
+
+    _run_plugin(monkeypatch, "?action=play&channel=libtv.movies")
+
+    tune = generator.read_current_tune()
+    assert (tune["start"], tune["offset"]) == (progs[1]["start"], 0), \
+        "the next programme must play from its start"
+    assert generator.read_pending_advance() is None, "the request is single-use"
+
+
+def test_resolver_ignores_an_advance_request_it_cannot_place(monkeypatch):
+    """A request names the exact programme that finished. One left behind
+    from a schedule that has since been rebuilt matches nothing, and must
+    leave the current programme alone rather than skipping blindly."""
+    from libtv import generator
+
+    _with_library(monkeypatch)
+    data = generator.regenerate()
+    offset = _freeze_mid_programme(monkeypatch, data, seconds_in=1800)
+    progs = data["channels"][0]["programmes"]
+    generator.write_pending_advance("libtv.movies", "/media/somewhere-else.mkv",
+                                    progs[0]["start"])
+
+    _run_plugin(monkeypatch, "?action=play&channel=libtv.movies")
+
+    tune = generator.read_current_tune()
+    assert (tune["start"], tune["offset"]) == (progs[0]["start"], offset)
+
+
+def test_resolver_never_advances_backwards(monkeypatch):
+    """Playback only moves forward: an advance request for a programme the
+    schedule has already moved well past must not drag the channel back to
+    it (the schedule is ahead of the request, so the schedule wins)."""
+    from libtv import generator
+
+    _with_library(monkeypatch)
+    data = generator.regenerate()
+    progs = data["channels"][0]["programmes"]
+    # Now sits inside the third programme; the request is about the first.
+    monkeypatch.setattr(time, "time", lambda: progs[2]["start"] + 60)
+    generator.write_pending_advance("libtv.movies", progs[0]["file"], progs[0]["start"])
+
+    _run_plugin(monkeypatch, "?action=play&channel=libtv.movies")
+
+    tune = generator.read_current_tune()
+    assert (tune["start"], tune["offset"]) == (progs[2]["start"], 60)
+
+
+def test_resolver_skips_a_slot_that_outlived_its_file(monkeypatch):
+    """Joining 50 minutes into a 100-minute slot whose file is really only
+    30 minutes long would serve the last few seconds of it (daemon.py's
+    seek clamp parks there) and bounce straight back out of Live TV."""
+    from libtv import generator
+
+    _with_library(monkeypatch)
+    data = generator.regenerate()
+    _freeze_mid_programme(monkeypatch, data, seconds_in=3000)
+    progs = data["channels"][0]["programmes"]
+    generator.record_observed_runtime("/media/a.mkv", 1800)
+
+    _run_plugin(monkeypatch, "?action=play&channel=libtv.movies")
+
+    tune = generator.read_current_tune()
+    assert (tune["start"], tune["offset"]) == (progs[1]["start"], 0)
+
+
+def test_resolver_plays_a_slot_whose_file_is_long_enough(monkeypatch):
+    """The dead-tail guard must only fire for slots that really have
+    outlived their content."""
+    from libtv import generator
+
+    _with_library(monkeypatch)
+    data = generator.regenerate()
+    offset = _freeze_mid_programme(monkeypatch, data, seconds_in=1800)
+    progs = data["channels"][0]["programmes"]
+    generator.record_observed_runtime("/media/a.mkv", 6000)
+
+    _run_plugin(monkeypatch, "?action=play&channel=libtv.movies")
+
+    tune = generator.read_current_tune()
+    assert (tune["start"], tune["offset"]) == (progs[0]["start"], offset)
 
 
 def test_resolver_writes_no_pending_seek_when_disabled(monkeypatch):

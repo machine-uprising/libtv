@@ -18,9 +18,19 @@ SCHEDULE_NAME = "schedule.json"
 CHANNELS_NAME = "channels.json"
 PENDING_SEEK_NAME = "pending_seek.json"
 RUNTIME_CACHE_NAME = "runtime_cache.json"
+CURRENT_TUNE_NAME = "current_tune.json"
+PENDING_ADVANCE_NAME = "pending_advance.json"
 
 # A pending seek older than this is abandoned (playback never started).
 PENDING_SEEK_MAX_AGE = 120
+
+# A tune record older than this is assumed to describe a tune that never
+# started playing (or one whose playback has long since been replaced).
+CURRENT_TUNE_MAX_AGE = 120
+
+# An advance request older than this is abandoned — the re-tune it was
+# written for never reached the resolver.
+PENDING_ADVANCE_MAX_AGE = 120
 
 # The PVR client that consumes our M3U/XMLTV output.
 PVR_CLIENT = "pvr.iptvsimple"
@@ -356,6 +366,89 @@ def load_schedule():
         return None
 
 
+def _write_record(name, payload):
+    """Persist a small hand-off record, stamped with its write time."""
+    payload = dict(payload, set_at=time.time())
+    with open(os.path.join(profile_dir(), name), "w", encoding="utf-8") as f:
+        json.dump(payload, f)
+
+
+def _read_record(name, max_age):
+    """Read a hand-off record, or None if missing/corrupt/older than max_age.
+
+    Stale and corrupt records are deleted on the way out; a fresh one is
+    left in place for the consumer to clear when it has acted on it.
+    """
+    path = os.path.join(profile_dir(), name)
+    if not os.path.exists(path):
+        return None
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        data = None
+    if not data or time.time() - data.get("set_at", 0) > max_age:
+        _clear_record(name)
+        return None
+    return data
+
+
+def _clear_record(name):
+    try:
+        os.remove(os.path.join(profile_dir(), name))
+    except OSError:
+        pass
+
+
+def write_current_tune(channel_id, channel_name, programme, offset):
+    """Record what the resolver just tuned, for the service to pick up.
+
+    The service needs more than the seek offset once a tune is playing: the
+    library path the stream really resolves to (the key the observed-runtime
+    cache must use — `Player.getPlayingFile()` is not guaranteed to report
+    it for a PVR stream), the slot it was scheduled into (to notice that the
+    guide disagrees with the file's real duration), and which channel it
+    belongs to (to re-tune at EOF). Written on *every* resolve, unlike
+    `pending_seek.json`, which only exists when there's a seek to perform.
+    """
+    _write_record(CURRENT_TUNE_NAME, {
+        "channel_id": channel_id,
+        "channel_name": channel_name,
+        "file": programme.get("file", ""),
+        "start": programme.get("start"),
+        "stop": programme.get("stop"),
+        "offset": int(offset),
+    })
+
+
+def read_current_tune():
+    """The most recent tune record, or None if there isn't a fresh one."""
+    return _read_record(CURRENT_TUNE_NAME, CURRENT_TUNE_MAX_AGE)
+
+
+def write_pending_advance(channel_id, file_path, start):
+    """Ask the resolver to skip past a programme that has already finished.
+
+    Written by the service when a file plays to its natural end while the
+    schedule still shows that same programme on air (its slot outlived its
+    real content). The next resolve of this channel plays the *following*
+    programme instead of re-resolving the finished one and seeking into its
+    dead tail. Names the exact programme being skipped, so a stale request
+    can never skip something else.
+    """
+    _write_record(PENDING_ADVANCE_NAME, {
+        "channel_id": channel_id, "file": file_path, "start": start,
+    })
+
+
+def read_pending_advance():
+    return _read_record(PENDING_ADVANCE_NAME, PENDING_ADVANCE_MAX_AGE)
+
+
+def clear_pending_advance():
+    _clear_record(PENDING_ADVANCE_NAME)
+
+
 def _pending_seek_path():
     return os.path.join(profile_dir(), PENDING_SEEK_NAME)
 
@@ -415,10 +508,14 @@ def load_runtime_cache():
     the real file — it's not a substitute for requesting streamdetails,
     which is still needed for Kodi to fill in runtime in the first place.
 
-    The file is stamped with the add-on version that wrote it; a version
-    mismatch (add-on upgraded since) discards the cache instead of trusting
-    a possibly-incompatible on-disk shape — cheap insurance against needing
-    migration code for a cache format change across releases.
+    Entries deliberately **survive add-on upgrades**: they are measurements
+    of the user's own files, and for an item whose library metadata has no
+    duration at all they are the only thing standing between it and a
+    default-length slot. An earlier version discarded the whole cache on any
+    version change, which meant every release re-broke exactly the items
+    this cache exists to fix. The on-disk shape is validated instead
+    ({file path: seconds}); the `"version"` stamp records which release last
+    wrote it and is informational only.
     """
     path = _runtime_cache_path()
     if not os.path.exists(path):
@@ -428,10 +525,13 @@ def load_runtime_cache():
             data = json.load(f)
     except (OSError, ValueError):
         return {}
-    if not isinstance(data, dict) or data.get("version") != _addon_version():
+    if not isinstance(data, dict):
         return {}
     entries = data.get("entries")
-    return entries if isinstance(entries, dict) else {}
+    if not isinstance(entries, dict):
+        return {}
+    return {k: int(v) for k, v in entries.items()
+            if isinstance(k, str) and isinstance(v, (int, float)) and v > 0}
 
 
 def record_observed_runtime(file_path, seconds):
