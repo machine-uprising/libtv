@@ -125,6 +125,31 @@ def test_add_mixed_channel_pulls_movies_and_episodes(monkeypatch):
     assert _refreshed()
 
 
+def test_a_re_added_channel_never_inherits_a_deleted_ones_id(monkeypatch):
+    """Kodi keys a PVR channel's guide entries, number and artwork on the id
+    from the M3U, so reusing a deleted channel's id hands the new channel
+    the old one's identity inside Kodi — guide rows that play something
+    else."""
+    _with_library(monkeypatch)
+    conftest.DIALOG_RESPONSES["select"].extend([0, 0])
+    conftest.DIALOG_RESPONSES["input"].extend(["First", "", ""])
+    _run_plugin(monkeypatch, "?action=channel_add")
+    assert "libtv.custom.1" in [d["id"] for d in generator.load_channel_defs()]
+
+    conftest.DIALOG_RESPONSES["select"].append(4)  # Delete
+    conftest.DIALOG_RESPONSES["yesno"].append(True)
+    _run_plugin(monkeypatch, "?action=channel_options&channel=libtv.custom.1")
+    assert "libtv.custom.1" not in [d["id"] for d in generator.load_channel_defs()]
+
+    conftest.DIALOG_RESPONSES["select"].extend([0, 0])
+    conftest.DIALOG_RESPONSES["input"].extend(["Second", "", ""])
+    _run_plugin(monkeypatch, "?action=channel_add")
+
+    ids = [d["id"] for d in generator.load_channel_defs()]
+    assert "libtv.custom.2" in ids
+    assert "libtv.custom.1" not in ids
+
+
 def test_add_channel_cancelled_changes_nothing(monkeypatch):
     _with_library(monkeypatch)  # no dialog answers queued = user cancels
 

@@ -117,7 +117,12 @@ deleted every channel.
 - **Ids are allocated once and never change or get reused**: the
   deterministic shuffle seed and the PVR channel identity both key off the
   id, so renames and reorders must not touch it. Manually created channels
-  get a counter-assigned `libtv.custom.<n>` id (`channels.next_id`).
+  get a counter-assigned `libtv.custom.<n>` id (`channels.next_id`), with
+  the highest number ever used persisted in `channels.json` as
+  `custom_high_water` — otherwise deleting the most recently added channel
+  would free its number and the next channel added would inherit its
+  identity inside Kodi, whose PVR database keys a channel's guide entries,
+  number and artwork on exactly that id.
   Autotune-generated channels (below) instead get a *deterministic*
   `libtv.auto.<type>.<slug>` id (`channels.auto_id`) derived from the
   channel type and genre label, so re-running autotune for the same
@@ -281,7 +286,12 @@ Built in `schedule.build_schedule`, persisted as `schedule.json`.
   sequence, not which items were selected. Same channel + same day ⇒ same
   order. **Invariant: regenerating during the day must never change what is
   currently on air** — this is why both the `random`-order selection and the
-  global reshuffle key off the same day anchor rather than wall-clock time.
+  global reshuffle key off the same day anchor rather than wall-clock time,
+  and why a rebuild carries already-published programmes forward rather
+  than re-packing the day (below). Determinism alone isn't enough: the
+  inputs themselves change (a scanned library item, a corrected runtime),
+  and a deterministic function of changed inputs still produces a different
+  timeline.
 - **Runtimes are SECONDS** (Kodi JSON-RPC convention). `library.py` must
   request the `streamdetails` property alongside `runtime`: Kodi only fills
   an episode's `runtime` from the file's stream details when stream details
@@ -336,6 +346,25 @@ Built in `schedule.build_schedule`, persisted as `schedule.json`.
   `LibTV: channel <id>: <n> of <m> items (runtime from — streamdetails: a,
   observed: b, topped-up: c, scraped: d, default: e)`. A report of
   implausible guide bars is answered by reading this line, not by guessing.
+- **A rebuild keeps what it has already published**
+  (`schedule._carry_forward`, used by `generator.regenerate()`). Programme
+  times are contiguous, so building the whole day from the anchor moves
+  every start time whenever *any* input changes — a corrected runtime, a
+  single newly scanned library item (which changes the day-stable sample,
+  and therefore the order), or the anchor itself rolling over at midnight
+  UTC. The guide a viewer is looking at is a snapshot taken when the PVR
+  client last reloaded, so that re-packing is precisely what makes guide
+  rows play something else. Each rebuild therefore carries forward the
+  programmes a channel has already published — today's past ones (bounded
+  at the day anchor, so history can't accumulate) and the one currently on
+  air — and rebuilds only the future, resuming the item cycle after the
+  airing programme. The airing programme's **end** is the one thing a
+  rebuild may change: it is set to the duration the freshly fetched items
+  report, never earlier than `now`, so a slot that outlived its file is
+  corrected without the programme disappearing from under a viewer. The
+  cost is that the schedule is no longer a pure function of (channel,
+  items, day) — it depends on the previous schedule. That is deliberate:
+  stability of what is *already on screen* beats recomputability.
 - **Lookup**: `schedule.find_current(data, channel_id, now)` returns
   `(programme, offset_seconds)` or `None` (unknown channel / schedule doesn't
   cover `now`).
@@ -398,7 +427,9 @@ first use.
 - **`schedule.json`** — see above.
 - **`channels.json`** — channel lineup configuration (§3). The only artifact
   written by the management UI rather than `regenerate()`; never touched by
-  regeneration.
+  regeneration. Also carries `custom_high_water`: the highest
+  `libtv.custom.<n>` id ever allocated, so a deleted channel's id is never
+  handed out again (§3).
 - **`runtime_cache.json`** — `{"version": <addon version>, "entries": {file_path: observed_seconds}}`,
   written by `daemon.JoinInProgressPlayer.onAVStarted` (settle-guarded, §6)
   for every file that starts playing, keyed by the **library path the
@@ -780,20 +811,51 @@ alternative — a guide that keeps lying for hours while playback ends early
 on every programme — is worse. The rebuild is logged:
 `LibTV: rebuilding — a measured duration contradicted the schedule`.
 
-IPTV Simple caches its M3U/EPG and has no reload API, so after every
-regeneration `generator.refresh_pvr()` toggles the `pvr.iptvsimple` add-on
-off and on over JSON-RPC (`Addons.SetAddonEnabled`); the PVR manager restarts
-the client and it re-reads both files, so lineup and guide changes appear
-without a Kodi restart. Guards, all of which make it return `False`:
+IPTV Simple has no reload API that another add-on can call, and Kodi
+exposes no JSON-RPC or builtin for "make this PVR client re-read its data"
+(`Addons.*` has only `GetAddons`/`GetAddonDetails`/`SetAddonEnabled`/
+`ExecuteAddon`, and the latter doesn't apply to binary PVR clients; `PVR.*`
+is read-only plus timers/recordings). There are therefore exactly two ways
+to get a regenerated M3U/guide in front of the user, and LibTV uses both:
 
-- the `refresh_pvr` setting is off;
-- **anything is playing** — toggling the client kills a live stream, so the
-  refresh is skipped;
-- IPTV Simple is not installed/enabled.
+1. **The client's own refresh timer — the one that doesn't restart
+   anything.** `configure_iptv_simple()` writes `m3uRefreshMode: "1"` and
+   `m3uRefreshIntervalMins` (`generator.PVR_REFRESH_INTERVAL_MINS`, 10)
+   into the instance settings. Despite the `m3u` prefix, the setting's own
+   description covers "the M3U/XMLTV files": IPTV Simple reloads channels,
+   groups and EPG in place, with no restart and nothing to interrupt, which
+   is the only mechanism that can refresh the guide **while a channel is
+   playing**. Both caches (`m3uCache`, `epgCache`) are written `false` to
+   match — a cached copy of a file LibTV rewrites is a stale guide by
+   definition, and IPTV Simple disables caching anyway when auto refresh is
+   on. The cost is latency: a change is picked up within the interval, not
+   immediately. (IPTV Simple's `Piers` branch adds `reloadOnLocalFileChange`,
+   which reacts within seconds of the file changing and is explicitly aimed
+   at add-ons that generate playlists locally — worth adopting when the
+   target Kodi version makes it available.)
+2. **An immediate toggle, when nothing is playing.** `refresh_pvr()`
+   disables and re-enables `pvr.iptvsimple` over JSON-RPC
+   (`Addons.SetAddonEnabled`); the PVR manager restarts the client and it
+   re-reads both files at once. Guards, all of which make it return
+   `False`:
+
+   - the `refresh_pvr` setting is off;
+   - **anything is playing** — toggling the client kills a live stream, so
+     the refresh is skipped and the client's own timer (1) is what
+     eventually picks the change up;
+   - IPTV Simple is not installed/enabled.
 
 `refresh_pvr()` is called only from the manual build action (`plugin.build`)
 and the service loop — **never from the stream resolver**: `plugin.play` also
 regenerates on a schedule miss, and a toggle mid-tune would abort the tune.
+
+Path (1) only exists on an instance LibTV configured. A user who set IPTV
+Simple up by hand has whatever refresh mode they chose (the schema default
+is `0`, off), and for them a guide written while something is playing waits
+for playback to stop and the toggle to fire. Running **Auto-configure IPTV
+Simple Client** adopts the settings above — on an existing same-named
+instance that asks for confirmation first (`"exists_different"`), since
+these values differ from what previous LibTV versions wrote.
 
 **IPTV Simple can be auto-configured, but only via an unofficial technique
 — there is no supported Kodi API for it.** The JSON-RPC `Addons.*`
@@ -1016,6 +1078,12 @@ default in `tests/conftest.py` `SETTINGS`.
 - No icon/fanart assets.
 - Rapid same-channel re-tune edge: if the same file is already playing, the
   seek may be skipped (accepted, benign).
+- **The guide-agreement work of v0.15.0 is unit-tested but not yet
+  live-verified** (§4, §7): rebuilds carrying published programmes forward,
+  IPTV Simple's own refresh timer being written into the instance settings
+  (including whether an in-place reload really leaves a playing stream
+  alone), and channel ids never being recycled. See
+  `docs/live-testing.md` §5d.
 - **The duration/continuation work of v0.14.0 is unit-tested but not yet
   live-verified** (§4, §6, §7): the smart-playlist duration top-up, the
   observed-runtime cache now being keyed by the resolver's library path and

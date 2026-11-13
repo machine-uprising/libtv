@@ -113,18 +113,53 @@ def load(path):
     return [d for d in (_normalize(e) for e in raw["channels"]) if d]
 
 
-def save(path, definitions):
+def _custom_number(defn):
+    match = _CUSTOM_ID.match(defn.get("id", ""))
+    return int(match.group(1)) if match else 0
+
+
+def custom_high_water(path):
+    """Highest libtv.custom.<n> ever allocated, as recorded by `save`.
+
+    Persisted because the live channel list forgets deleted channels, and a
+    deleted channel's id must never be handed out again: Kodi's PVR database
+    keys a channel (and its guide entries, number and artwork) on the id
+    from the M3U, so a new channel inheriting a deleted one's id inherits
+    its identity in Kodi too — guide rows pointing at the wrong programmes.
+    Missing or unreadable ⇒ 0, i.e. fall back to the live definitions.
+    """
+    try:
+        with open(path, encoding="utf-8") as f:
+            raw = json.load(f)
+    except (OSError, ValueError):
+        return 0
+    if not isinstance(raw, dict):
+        return 0
+    try:
+        return int(raw.get("custom_high_water") or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def save(path, definitions, high_water=0):
+    """Persist the lineup, carrying the custom-id high-water mark forward so
+    ids survive deletion (see `custom_high_water`)."""
+    high_water = max([high_water] + [_custom_number(d) for d in definitions])
     with open(path, "w", encoding="utf-8") as f:
-        json.dump({"version": 1, "channels": definitions}, f, indent=2)
+        json.dump(
+            {"version": 1, "custom_high_water": high_water, "channels": definitions},
+            f, indent=2,
+        )
 
 
-def next_id(definitions):
-    """Next unused libtv.custom.<n> id (stable — never reuses a live id)."""
-    highest = 0
-    for defn in definitions:
-        match = _CUSTOM_ID.match(defn.get("id", ""))
-        if match:
-            highest = max(highest, int(match.group(1)))
+def next_id(definitions, high_water=0):
+    """Next unused libtv.custom.<n> id.
+
+    Never reuses an id, including one freed by deleting a channel —
+    `high_water` carries the ids that are gone from `definitions` but may
+    still be known to Kodi.
+    """
+    highest = max([high_water] + [_custom_number(d) for d in definitions])
     return f"libtv.custom.{highest + 1}"
 
 

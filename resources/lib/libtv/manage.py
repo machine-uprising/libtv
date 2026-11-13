@@ -177,7 +177,7 @@ def _preview_match_count(defn):
 
 def _blank_channel(definitions, name, channel_type):
     return {
-        "id": channels.next_id(definitions),
+        "id": generator.next_channel_id(definitions),
         "name": name,
         "type": channel_type,
         "genres": [],

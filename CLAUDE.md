@@ -248,6 +248,27 @@ encouraged for diagnosis.
   items, using the `type`/`id` every library item in a directory listing
   carries. Don't "simplify" this away by assuming the directory listing's
   properties are equivalent to the `VideoLibrary.Get*` ones.
+- **A PVR client can be made to reload without being restarted — but only
+  by itself.** Kodi exposes nothing for "make this PVR client re-read its
+  data": `Addons.*` has four methods (`GetAddons`, `GetAddonDetails`,
+  `SetAddonEnabled`, `ExecuteAddon` — the last doesn't apply to binary PVR
+  clients) and `PVR.*` is read-only plus timers/recordings. So from
+  outside, `refresh_pvr()`'s enable/disable toggle is the only lever, and
+  it restarts the client (killing any stream, hence its `isPlaying` guard).
+  **IPTV Simple's own `m3uRefreshMode`/`m3uRefreshIntervalMins` settings**
+  (which its description defines as covering "the M3U/XMLTV files", not
+  just the playlist) reload channels, groups and EPG in place — the only
+  way to refresh the guide while something is playing.
+  `_desired_pvr_instance_settings()` writes them. IPTV Simple's `Piers`
+  branch adds `reloadOnLocalFileChange` (merged 2026-11-02, explicitly for
+  add-ons that generate playlists locally) which reacts in seconds — adopt
+  it when the target Kodi makes it available.
+- **Never reuse a channel id, even a deleted channel's.** Kodi's PVR
+  database keys a channel's guide entries, number and artwork on the id
+  from the M3U, so a new channel handed a deleted one's id inherits its
+  identity inside Kodi. `channels.next_id` takes a `high_water` floor
+  persisted in `channels.json` (`custom_high_water`) rather than just
+  `max(live ids) + 1`.
 - **`Player().getTotalTime()` is the player's claim, not a measurement** —
   for a PVR stream it can describe the channel's current EPG entry rather
   than the file behind it, which would confirm exactly the slot length
@@ -392,15 +413,18 @@ encouraged for diagnosis.
   at `max_items` would pick a different item set on every regeneration.
   Instead fetch the full filtered set unsorted and pick the day-stable
   sample with `schedule.shuffled(channel_id, items, anchor)`.
-  **One sanctioned exception**: the stale-schedule rebuild
-  (`daemon.schedule_stale`, `docs/architecture.md` §7). When playback
-  measures a duration that contradicts the slot an item was scheduled
-  into, the schedule is known to be wrong and is rebuilt promptly, which
-  necessarily re-packs the rest of the day. The invariant forbids
-  nondeterminism, not correcting data known to be wrong — a guide that
-  keeps lying for hours while every programme ends early is worse. Don't
-  widen the exception beyond "a real measurement contradicted the
-  schedule".
+  **Determinism alone does not satisfy this invariant** — the *inputs*
+  change constantly (a newly scanned library item changes the day-stable
+  sample, a learned runtime changes every start time after it), and a
+  deterministic function of changed inputs still yields a different
+  timeline. So `regenerate()` carries already-published programmes forward
+  (`schedule._carry_forward`): today's past programmes and the one on air
+  survive a rebuild, and only the future is rebuilt. The single thing a
+  rebuild may change about the airing programme is its **end** (to the
+  duration the fresh items report, never earlier than now). Don't "simplify"
+  this back to building the whole day from the anchor — the guide the PVR
+  client is showing is a snapshot from its last reload, and re-packing
+  under it is what makes guide rows play a different programme.
 - **`schedule.json` is the contract between generator and resolver.** The
   XMLTV guide, the M3U, and playback resolution all derive from the same
   persisted schedule; never compute "what's on" from anything else.
@@ -673,6 +697,21 @@ see `docs/live-testing.md` for the checklist.
   single-use and names one programme, so successive EOFs walk forward
   instead of replaying a slot. **Not yet live-verified** — see
   `docs/live-testing.md` §5b/§5c.
+- **User-reported (live, 2026-11): clicking a programme in the EPG played a
+  different show.** Root causes, all structural rather than a mis-wired id
+  (the M3U `tvg-id` and the XMLTV `<channel id>` come from the same field,
+  and XMLTV times are UTC with a literal `+0000`, so neither can drift):
+  the guide is a snapshot taken at the PVR client's last reload, while
+  rebuilds used to re-pack the whole day from the anchor — which any
+  changed input triggers — and the reload itself is skipped for as long as
+  anything is playing. **Fixes (v0.15.0)**: rebuilds carry already-published
+  programmes forward (`schedule._carry_forward`); IPTV Simple is configured
+  to re-read both files on its own timer, the only refresh that works
+  during playback; and `channels.next_id` no longer recycles a deleted
+  channel's id. Note that clicking a programme that isn't airing *now*
+  still tunes the channel live — Kodi has no catch-up here, so that part is
+  expected behavior, not a bug. **Not yet live-verified** — see
+  `docs/live-testing.md` §5d.
 - The channel management UI (custom channels, filters, reorder, the
   diff-driven invalidation that skips a library refetch for rename/move/
   delete), genre- and studio-based autotune (`manage.autotune_genres`,

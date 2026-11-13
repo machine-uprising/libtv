@@ -129,7 +129,12 @@ def test_configure_iptv_simple_writes_instance_and_toggles(monkeypatch):
         "m3uCache": "false",
         "epgPathType": "0",
         "epgPath": generator.xmltv_special_path(),
-        "epgCache": "true",
+        "epgCache": "false",
+        # The client re-reads both files on its own timer: the enable/disable
+        # toggle restarts the client and so can never run while something is
+        # playing, which is exactly when the guide goes stale.
+        "m3uRefreshMode": "1",
+        "m3uRefreshIntervalMins": str(generator.PVR_REFRESH_INTERVAL_MINS),
     }
 
 
@@ -362,6 +367,31 @@ def test_resolver_plays_current_programme_and_hands_off_seek(monkeypatch):
     pending = generator.read_pending_seek()
     assert pending["file"] == "/media/a.mkv"
     assert pending["offset"] == offset
+
+
+def test_regenerate_keeps_what_is_on_air_when_the_library_changes(monkeypatch):
+    """The guide in front of the viewer was published at the PVR client's
+    last reload. A rebuild that re-packs the day — which scanning a single
+    new episode does, since it reshuffles the day-stable sample — is what
+    makes guide rows play something else."""
+    from libtv import generator, schedule
+
+    _with_library(monkeypatch)
+    first = generator.regenerate()
+    airing_before = first["channels"][1]["programmes"][0]
+    now = airing_before["start"] + 300
+    monkeypatch.setattr(time, "time", lambda: now)
+    monkeypatch.setitem(conftest.JSONRPC_RESPONSES, "VideoLibrary.GetEpisodes", {
+        "episodes": EPISODES["episodes"] + [
+            {"title": "Later", "file": "/media/s01e02.mkv", "runtime": 1500,
+             "showtitle": "Some Show", "season": 1, "episode": 2},
+        ],
+    })
+
+    second = generator.regenerate()
+
+    assert schedule.find_current(second, "libtv.tv", now)[0] == airing_before
+    assert generator.load_schedule()["channels"][1]["programmes"][0] == airing_before
 
 
 def test_resolver_records_the_tune_for_the_service(monkeypatch):

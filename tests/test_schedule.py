@@ -75,6 +75,94 @@ def test_build_schedule_falls_back_to_the_default_when_the_channel_knows_nothing
     assert prog["stop"] - prog["start"] == schedule.DEFAULT_RUNTIME
 
 
+def _rebuild(previous, now, items=None, horizon_hours=12):
+    channels = [dict(CHANNELS[0], items=items if items is not None else ITEMS)]
+    return schedule.build_schedule(
+        channels, ANCHOR, now + horizon_hours * 3600, previous=previous, now_epoch=now
+    )
+
+
+def test_rebuilding_does_not_move_what_has_already_aired():
+    """The guide a viewer is looking at was published at the PVR client's
+    last reload. Re-packing the day from the anchor — which any changed
+    runtime or newly scanned library item triggers — is what makes that
+    guide point at programmes that are no longer there."""
+    first = schedule.build_schedule(CHANNELS, ANCHOR, ANCHOR + 12 * 3600)
+    now = first["channels"][0]["programmes"][2]["start"] + 60
+    # A changed item pool: without carry-forward this re-packs every slot.
+    changed = ITEMS + [{"title": "Movie C", "file": "/media/c.mkv", "runtime": 3000}]
+
+    second = _rebuild(first, now, items=changed)
+
+    before = first["channels"][0]["programmes"][:3]
+    after = second["channels"][0]["programmes"][:3]
+    assert after == before, "aired and airing programmes must survive a rebuild"
+    assert schedule.find_current(second, "libtv.movies", now)[0] == before[2]
+
+
+def test_rebuilding_corrects_the_airing_programmes_end_only():
+    """The one change worth making to a published programme: ending it when
+    it really ends. Its identity and start must not move, and it can never
+    be cut short of `now`."""
+    first = schedule.build_schedule(CHANNELS, ANCHOR, ANCHOR + 12 * 3600)
+    airing = first["channels"][0]["programmes"][0]
+    now = airing["start"] + 600
+    # Movie A turns out to be 20 minutes, not 100.
+    corrected = [dict(ITEMS[0], runtime=1200), ITEMS[1]]
+
+    second = _rebuild(first, now, items=corrected)
+    progs = second["channels"][0]["programmes"]
+
+    assert progs[0]["start"] == airing["start"]
+    assert progs[0]["file"] == airing["file"]
+    assert progs[0]["stop"] == airing["start"] + 1200
+    assert progs[1]["start"] == progs[0]["stop"], "the rest re-packs from there"
+
+
+def test_a_programme_that_already_overran_ends_now_not_in_the_past():
+    first = schedule.build_schedule(CHANNELS, ANCHOR, ANCHOR + 12 * 3600)
+    airing = first["channels"][0]["programmes"][0]
+    now = airing["start"] + 3000
+    corrected = [dict(ITEMS[0], runtime=600), ITEMS[1]]  # ended 40 min ago
+
+    progs = _rebuild(first, now, items=corrected)["channels"][0]["programmes"]
+
+    assert progs[0]["stop"] == now, "never leave a gap or a stop in the past"
+    assert schedule.find_current(_rebuild(first, now, items=corrected),
+                                 "libtv.movies", now) is not None
+
+
+def test_rebuilding_continues_the_item_cycle_after_the_airing_programme():
+    first = schedule.build_schedule(CHANNELS, ANCHOR, ANCHOR + 12 * 3600)
+    now = first["channels"][0]["programmes"][0]["start"] + 60
+
+    progs = _rebuild(first, now)["channels"][0]["programmes"]
+
+    assert progs[0]["file"] == "/media/a.mkv"
+    assert progs[1]["file"] == "/media/b.mkv", "not back to the top of the list"
+
+
+def test_rebuilding_drops_programmes_from_before_the_day_anchor():
+    """Carrying the past forward must not accumulate forever."""
+    yesterday = ANCHOR - schedule.DAY_SECONDS
+    first = schedule.build_schedule(CHANNELS, yesterday, ANCHOR + 6 * 3600)
+    now = ANCHOR + 3600
+
+    progs = _rebuild(first, now)["channels"][0]["programmes"]
+
+    assert all(p["stop"] > ANCHOR for p in progs), "yesterday is not carried over"
+    for prev, nxt in zip(progs, progs[1:]):
+        assert prev["stop"] == nxt["start"], "and the result is still contiguous"
+
+
+def test_rebuilding_a_channel_with_no_history_starts_from_the_anchor():
+    previous = {"anchor": ANCHOR, "channels": []}
+
+    progs = _rebuild(previous, ANCHOR + 3600)["channels"][0]["programmes"]
+
+    assert progs[0]["start"] == ANCHOR
+
+
 def test_next_after_returns_the_following_programme():
     channels = [{"id": "c", "name": "C", "items": ITEMS}]
     data = schedule.build_schedule(channels, ANCHOR, ANCHOR + 12 * 3600)

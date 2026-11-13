@@ -279,5 +279,19 @@ within half a minute of learning that a real duration contradicts it,
 continues to the *next* programme when one ends early, and never resolves
 a stream into the last seconds of a file. It also logs, per channel and
 per tune, exactly where each slot length came from. Awaiting live
-verification — see `docs/live-testing.md` §5c and `CLAUDE.md` for
-development constraints and known gaps.
+verification — see `docs/live-testing.md` §5c. v0.15.0 answers a third
+live report, clicking a programme in the guide and getting a different
+show. The guide you see is a snapshot taken when the PVR client last
+reloaded, and a rebuild used to re-pack the whole day's timeline — which
+scanning a single new episode is enough to trigger — so guide rows could
+end up pointing at programmes that had moved. Rebuilds now keep the
+programmes they have already published, correcting only when the current
+one *ends*; LibTV configures IPTV Simple to re-read its files on its own
+timer, which is the only refresh that works while something is playing
+(the previous mechanism restarts the client and so was always skipped
+mid-stream); and a deleted channel's id is never handed to a new channel,
+which Kodi would otherwise treat as the same channel. Note that selecting
+a programme that is not currently on air still tunes the channel live —
+there is no catch-up. Awaiting live verification — see
+`docs/live-testing.md` §5d and `CLAUDE.md` for development constraints and
+known gaps.

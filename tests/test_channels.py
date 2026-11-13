@@ -75,6 +75,32 @@ def test_next_id_skips_existing_custom_ids():
     assert channels.next_id([]) == "libtv.custom.1"
 
 
+def test_next_id_never_reuses_a_deleted_channels_id(tmp_path):
+    """Kodi's PVR database keys a channel — and its guide entries, number
+    and artwork — on the id from the M3U, so handing a deleted channel's id
+    to a new one makes the new channel inherit the old one's identity in
+    Kodi, guide rows included."""
+    path = str(tmp_path / "channels.json")
+    channels.save(path, [_custom(id="libtv.custom.1"), _custom(id="libtv.custom.2")])
+
+    # The user deletes the most recently added channel.
+    remaining = [_custom(id="libtv.custom.1")]
+    channels.save(path, remaining, channels.custom_high_water(path))
+
+    assert channels.custom_high_water(path) == 2
+    assert channels.next_id(remaining, channels.custom_high_water(path)) == "libtv.custom.3"
+
+
+def test_custom_high_water_tolerates_a_file_without_one(tmp_path):
+    """A lineup saved by an older version has no high-water mark; the live
+    definitions are the floor until the next save records one."""
+    path = tmp_path / "channels.json"
+    path.write_text(json.dumps({"version": 1, "channels": []}), encoding="utf-8")
+
+    assert channels.custom_high_water(str(path)) == 0
+    assert channels.custom_high_water(str(tmp_path / "missing.json")) == 0
+
+
 def test_move_swaps_and_respects_bounds():
     defs = channels.default_lineup()
     assert channels.move(defs, "libtv.tv", -1) is True

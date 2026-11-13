@@ -32,15 +32,17 @@ several tempting explanations up front, so don't spend time on them:
   scheme — so a manual-dropdown mistake (e.g. EPG field left on "Remote
   URL") isn't possible on that path. (It *is* possible if you set IPTV
   Simple up by hand instead — see step 2 below.)
-- **The one real asymmetry auto-configure writes**: `m3uCache: "false"` vs
-  `epgCache: "true"` (`generator._desired_pvr_instance_settings()`). LibTV
-  disables IPTV Simple's cache for the channel list but leaves it enabled
-  for the guide. This is currently undocumented/unexplained in
-  `docs/architecture.md` §7, and is the strongest code-level lead: if IPTV
-  Simple's EPG cache doesn't get correctly invalidated after LibTV writes a
-  fresh `guide.xmltv` and toggles the addon, it would keep serving
-  stale/empty cached guide data indefinitely while the M3U (never cached)
-  keeps loading fine — which looks exactly like this symptom.
+- **Caching is no longer an asymmetry** (as of v0.15.0): auto-configure
+  writes `m3uCache: "false"` *and* `epgCache: "false"`, plus
+  `m3uRefreshMode: "1"` so the client re-reads both files on its own timer
+  (`docs/architecture.md` §7). Earlier versions left `epgCache: "true"`,
+  which was the strongest code-level lead for this symptom — a cached guide
+  that never got invalidated after LibTV wrote a fresh `guide.xmltv` would
+  look exactly like this, while the M3U (never cached) kept loading fine.
+  **If you are debugging an instance configured by an older LibTV, or one
+  you set up by hand, check these values first** in
+  `userdata/addon_data/pvr.iptvsimple/instance-settings-*.xml` and re-run
+  **Auto-configure IPTV Simple Client** to adopt the current ones.
 
 ## Step 1 — does `guide.xmltv` actually have programme data?
 

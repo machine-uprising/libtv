@@ -764,6 +764,50 @@ three reasons the observed-runtime cache could never rescue them. See
   (`properties=yes` ⇒ `pending_seek.json` can finally be deleted, see §5),
   and whether the slot the guide shows matches the file actually playing.
 
+## 5d. Guide/playback agreement (v0.15.0) — NOT yet live-verified
+
+Background: a live report of clicking a programme in the EPG and getting a
+different show. The guide is a snapshot from the PVR client's last reload;
+rebuilds used to re-pack the whole day's timeline, and the reload is skipped
+while anything plays. See `docs/architecture.md` §4 and §7.
+
+- **A rebuild doesn't move what's on air** — note what the guide says is
+  playing now on a channel, then force a rebuild (**Rebuild channels now**,
+  or play an item whose duration is wrong and let the stale-schedule
+  rebuild fire). The current programme's *title and start time* must be
+  unchanged afterwards in both `schedule.json` and the guide; only its end
+  time may have moved (earlier, never before now). The programmes after it
+  are free to change.
+- **Then clicking it plays it** — with the guide showing programme X as on
+  air now, select it: playback must be X, joined partway in. Repeat after a
+  library scan (adding an episode used to reshuffle every channel's whole
+  day) and across a midnight-UTC rollover if you can.
+- **Clicking a programme that is NOT on now still tunes live** — this is
+  expected, not a bug: there's no catch-up, so Kodi can only switch to the
+  channel. Worth confirming you can tell the two cases apart before
+  reporting a mismatch.
+- **The guide updates while something is playing** — this is the new
+  mechanism. With a channel playing, trigger a rebuild and wait up to
+  `generator.PVR_REFRESH_INTERVAL_MINS` (10 min): the guide should pick up
+  the new data **without** the stream being interrupted and without
+  `LibTV: toggled IPTV Simple to reload channels and guide` appearing (that
+  line is the restart path, which stays skipped during playback). If
+  playback *is* interrupted when the client reloads, that's the one risk in
+  this change — report it, and the interval can be lengthened or the
+  setting dropped.
+  - Requires IPTV Simple to actually have the setting: run
+    **Auto-configure IPTV Simple Client** once after upgrading (it will ask
+    for confirmation, since these values differ from what earlier versions
+    wrote), or set it by hand under PVR clients → IPTV Simple → Configure →
+    General → *Auto refresh mode* = "Repeated refresh". Confirm
+    `m3uRefreshMode`/`m3uRefreshIntervalMins` in
+    `userdata/addon_data/pvr.iptvsimple/instance-settings-*.xml`.
+- **A deleted channel's id is never reused** — add a channel (note its
+  `libtv.custom.<n>` id in `channels.json`), delete it, add another: the
+  new one must get the *next* number, and `channels.json` should carry
+  `custom_high_water`. Reusing the number would hand the new channel the
+  deleted one's guide entries and channel number inside Kodi.
+
 ## 6. Sanity-check the library over JSON-RPC
 
 `scripts/sanity_check.py` queries a running Kodi's HTTP JSON-RPC endpoint with

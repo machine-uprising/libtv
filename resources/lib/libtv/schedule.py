@@ -54,9 +54,12 @@ def fallback_runtime(items):
     return (known[mid - 1] + known[mid]) // 2
 
 
+def _duration(item, fallback):
+    return max(MIN_RUNTIME, int(item.get("runtime") or 0) or fallback)
+
+
 def _programme(item, start, fallback=DEFAULT_RUNTIME):
-    runtime = item.get("runtime") or 0
-    duration = max(MIN_RUNTIME, int(runtime) or fallback)
+    duration = _duration(item, fallback)
     prog = {
         "start": start,
         "stop": start + duration,
@@ -91,20 +94,81 @@ def _programme(item, start, fallback=DEFAULT_RUNTIME):
     return prog
 
 
-def build_schedule(channels, anchor_epoch, until_epoch):
+def _next_index(items, file_path):
+    """Where to resume a channel's item cycle after `file_path`."""
+    for i, item in enumerate(items):
+        if item.get("file") == file_path:
+            return i + 1
+    return 0
+
+
+def _known_duration(items, file_path, fallback):
+    """How long `file_path` should be scheduled for according to the items
+    fetched now, or None if the channel no longer carries it."""
+    for item in items:
+        if item.get("file") == file_path:
+            return _duration(item, fallback)
+    return None
+
+
+def _carry_forward(previous_channel, items, fallback, anchor_epoch, now_epoch):
+    """(programmes to keep, cursor to continue from, next item index).
+
+    A rebuild must not change what a channel is showing *now*. Programme
+    times are contiguous, so re-packing from the anchor moves every start
+    time whenever any input changes — a corrected runtime, a newly scanned
+    library item (which reshuffles the day-stable sample), or the midnight
+    anchor rolling over. The guide a viewer is looking at was published at
+    the PVR client's last reload, so that re-packing is what makes the guide
+    disagree with what actually plays.
+
+    Everything already published therefore survives a rebuild: today's past
+    programmes (bounded at the day anchor so this can't grow without limit)
+    and the one currently on air. Only the airing programme's *end* is
+    corrected, to the duration the items now report — that is the one change
+    that makes the guide more truthful rather than less, and it is never
+    pulled back before `now_epoch`, so the programme cannot vanish from
+    under a viewer. Everything after it is rebuilt freely.
+    """
+    if not previous_channel or now_epoch is None:
+        return [], anchor_epoch, 0
+
+    programmes = previous_channel.get("programmes") or []
+    kept = [dict(p) for p in programmes if anchor_epoch < p["stop"] <= now_epoch]
+    airing = next(
+        (dict(p) for p in programmes if p["start"] <= now_epoch < p["stop"]), None
+    )
+    if airing is not None:
+        duration = _known_duration(items, airing.get("file"), fallback)
+        if duration:
+            airing["stop"] = max(airing["start"] + duration, now_epoch)
+        kept.append(airing)
+    if not kept:
+        return [], anchor_epoch, 0
+    last = kept[-1]
+    return kept, last["stop"], _next_index(items, last.get("file"))
+
+
+def build_schedule(channels, anchor_epoch, until_epoch, previous=None, now_epoch=None):
     """Build a schedule dict from channel definitions.
 
     channels: [{"id", "name", "group", "logo", "items": [library items]}]
     Programmes run back-to-back from anchor_epoch until at least until_epoch,
     cycling through the item list as many times as needed.
+
+    Given a `previous` schedule and the current time, each channel keeps the
+    programmes it has already published and only rebuilds the future — see
+    `_carry_forward`. Without them (the first build, or a caller that wants
+    a clean timeline) every channel is built from the anchor.
     """
     out = {"anchor": anchor_epoch, "channels": []}
+    previous_by_id = {ch["id"]: ch for ch in (previous or {}).get("channels", [])}
     for ch in channels:
-        programmes = []
         items = ch.get("items") or []
         fallback = fallback_runtime(items)
-        cursor = anchor_epoch
-        index = 0
+        programmes, cursor, index = _carry_forward(
+            previous_by_id.get(ch["id"]), items, fallback, anchor_epoch, now_epoch
+        )
         while items and cursor < until_epoch:
             prog = _programme(items[index % len(items)], cursor, fallback)
             programmes.append(prog)

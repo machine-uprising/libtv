@@ -39,6 +39,12 @@ PVR_CLIENT = "pvr.iptvsimple"
 # seed for that instance's id, so it's always found at the same path again.
 PVR_INSTANCE_NAME = "LibTV"
 
+# How often IPTV Simple re-reads our M3U/XMLTV by itself (minutes; its own
+# setting accepts 1-120). This is the only reload path that doesn't restart
+# the client, so it is what keeps the guide current while something is
+# playing — see _desired_pvr_instance_settings.
+PVR_REFRESH_INTERVAL_MINS = 10
+
 
 def profile_dir():
     addon = xbmcaddon.Addon()
@@ -87,7 +93,14 @@ def load_channel_defs():
 
 
 def save_channel_defs(definitions):
-    channels.save(channels_path(), definitions)
+    path = channels_path()
+    channels.save(path, definitions, channels.custom_high_water(path))
+
+
+def next_channel_id(definitions):
+    """Id for a new manually created channel — never one a deleted channel
+    already used (see channels.custom_high_water)."""
+    return channels.next_id(definitions, channels.custom_high_water(channels_path()))
 
 
 def _int_setting(addon, setting_id, default):
@@ -123,7 +136,15 @@ def regenerate():
         for ch in lineup:
             ch["items"] = schedule.shuffled(ch["id"], ch["items"], anchor)
 
-    data = schedule.build_schedule(lineup, anchor, now + epg_hours * 3600)
+    # Rebuild around what is already published rather than re-packing the
+    # whole day: the guide a viewer sees was loaded by the PVR client at its
+    # last reload, so moving programmes that have already aired (or are
+    # airing) is what makes the guide disagree with what plays — see
+    # schedule._carry_forward.
+    data = schedule.build_schedule(
+        lineup, anchor, now + epg_hours * 3600,
+        previous=load_schedule(), now_epoch=now,
+    )
 
     with open(m3u_path(), "w", encoding="utf-8") as f:
         f.write(writers.render_m3u(data, addon_id))
@@ -293,7 +314,22 @@ def _desired_pvr_instance_settings(name):
         "m3uCache": "false",
         "epgPathType": "0",
         "epgPath": xmltv_special_path(),
-        "epgCache": "true",
+        # Caching has to be off for both, not just the M3U: a cached copy of
+        # a file LibTV rewrites every few hours is a stale guide by
+        # definition. (IPTV Simple's own documentation says caching is
+        # disabled anyway whenever auto refresh is on — this makes the file
+        # say what it means.)
+        "epgCache": "false",
+        # Make the client re-read both files by itself, so routine updates
+        # don't depend on refresh_pvr()'s enable/disable toggle — that
+        # restarts the client, which kills any playing stream, so it is
+        # skipped whenever anything is playing and the guide stays stale for
+        # as long as someone keeps watching. IPTV Simple's own refresh timer
+        # reloads channels, groups and EPG in place, with nothing to
+        # interrupt. The setting is named for the M3U but its own
+        # description covers "the M3U/XMLTV files".
+        "m3uRefreshMode": "1",  # 0 = off, 1 = repeated interval, 2 = daily
+        "m3uRefreshIntervalMins": str(PVR_REFRESH_INTERVAL_MINS),
     }
 
 
